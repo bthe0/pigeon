@@ -122,6 +122,13 @@ pigeon forward remove <id|domain|port>
 pigeon forward list
 ```
 
+### `pigeon web` — Start the configuration web interface
+
+```bash
+pigeon web --addr 127.0.0.1:8080
+```
+This opens a beautiful single-page dashboard where you can view, add, and delete configuration forwards, and easily restart the background daemon.
+
 ### `pigeon daemon` — Manage the background process
 
 ```bash
