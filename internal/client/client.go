@@ -1,6 +1,7 @@
 package client
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -169,14 +170,26 @@ func (c *Client) handleStream(stream net.Conn) {
 
 	switch hdr.Protocol {
 	case proto.ProtoHTTP, proto.ProtoTCP:
-		c.handleTCPStream(stream, rule, hdr)
+		c.handleTCPStream(stream, rule, hdr, false)
+	case proto.ProtoHTTPS:
+		c.handleTCPStream(stream, rule, hdr, true)
 	case proto.ProtoUDP:
 		c.handleUDPStream(stream, rule)
 	}
 }
 
-func (c *Client) handleTCPStream(stream net.Conn, rule *ForwardRule, hdr proto.StreamHeader) {
-	local, err := net.DialTimeout("tcp", rule.LocalAddr, 5*time.Second)
+func (c *Client) handleTCPStream(stream net.Conn, rule *ForwardRule, hdr proto.StreamHeader, useTLS bool) {
+	var local net.Conn
+	var err error
+	if useTLS {
+		local, err = tls.DialWithDialer(
+			&net.Dialer{Timeout: 5 * time.Second},
+			"tcp", rule.LocalAddr,
+			&tls.Config{InsecureSkipVerify: true}, // local service may use self-signed cert
+		)
+	} else {
+		local, err = net.DialTimeout("tcp", rule.LocalAddr, 5*time.Second)
+	}
 	if err != nil {
 		log.Printf("[%s] dial local %s: %v", rule.ID, rule.LocalAddr, err)
 		return
@@ -280,14 +293,22 @@ func (c *Client) SendForwardAdd(rule ForwardRule) error {
 }
 
 func (c *Client) sendForwardAdd(rule ForwardRule) error {
+	domain := rule.Domain
+	// For HTTP tunnels with no explicit domain, reuse the previously-assigned
+	// subdomain (saved in PublicAddr) so the URL stays stable across restarts.
+	if domain == "" && rule.PublicAddr != "" &&
+		(rule.Protocol == proto.ProtoHTTP || rule.Protocol == proto.ProtoHTTPS) {
+		domain = rule.PublicAddr
+	}
 	return proto.Write(c.ctrl, proto.Message{
 		Type: proto.MsgForwardAdd,
 		Payload: proto.ForwardPayload{
 			ID:         rule.ID,
 			Protocol:   rule.Protocol,
 			LocalAddr:  rule.LocalAddr,
-			Domain:     rule.Domain,
+			Domain:     domain,
 			RemotePort: rule.RemotePort,
+			Expose:     rule.Expose,
 		},
 	})
 }

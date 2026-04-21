@@ -23,9 +23,10 @@ const (
 type Protocol string
 
 const (
-	ProtoHTTP Protocol = "http"
-	ProtoTCP  Protocol = "tcp"
-	ProtoUDP  Protocol = "udp"
+	ProtoHTTP  Protocol = "http"
+	ProtoHTTPS Protocol = "https" // forward to a local service that speaks TLS
+	ProtoTCP   Protocol = "tcp"
+	ProtoUDP   Protocol = "udp"
 )
 
 // Message is the control channel message envelope.
@@ -45,9 +46,10 @@ type AuthAckPayload struct {
 type ForwardPayload struct {
 	ID         string   `json:"id"`
 	Protocol   Protocol `json:"protocol"`
-	LocalAddr  string   `json:"local_addr"`           // e.g. "localhost:3000"
-	Domain     string   `json:"domain,omitempty"`     // http only
+	LocalAddr  string   `json:"local_addr"`            // e.g. "localhost:3000"
+	Domain     string   `json:"domain,omitempty"`      // http only
 	RemotePort int      `json:"remote_port,omitempty"` // tcp/udp; 0 = assign random
+	Expose     string   `json:"expose,omitempty"`      // "both" | "http" | "https"; default "both"
 }
 
 type ForwardAckPayload struct {

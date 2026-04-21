@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -105,29 +106,87 @@ func DaemonStatus() {
 	fmt.Printf("Daemon: running (PID %d)\n", pid)
 }
 
+// DaemonReload sends SIGHUP to the daemon, triggering an immediate reconnect.
+func DaemonReload() {
+	pidFile, err := PIDFile()
+	if err != nil {
+		return
+	}
+	pid, err := readPID(pidFile)
+	if err != nil {
+		return
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+	_ = proc.Signal(syscall.SIGHUP)
+}
+
 // DaemonRun is the daemon's main loop — connects and reconnects with backoff.
 func DaemonRun(cfg *Config) {
 	pidFile, _ := PIDFile()
 	writePID(pidFile, os.Getpid())
 	defer os.Remove(pidFile)
 
+	reload := make(chan struct{}, 1)
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGHUP)
+	go func() {
+		for range sigs {
+			select {
+			case reload <- struct{}{}:
+			default:
+			}
+		}
+	}()
+
 	attempt := 0
 	for {
+		// Always reload config from disk so edits made via web UI are picked up.
+		if fresh, err := LoadConfig(); err == nil {
+			cfg = fresh
+		}
+
 		log.Printf("Connecting to %s (attempt %d)...", cfg.Server, attempt+1)
 		c, err := New(cfg)
 		if err != nil {
 			log.Printf("client init: %v", err)
 		} else {
-			if err := c.Connect(); err != nil {
-				log.Printf("disconnected: %v", err)
+			c.OnAddr = func(id, publicAddr string) {
+				cfg.SetPublicAddr(id, publicAddr)
+				if err := SaveConfig(cfg); err != nil {
+					log.Printf("save config: %v", err)
+				}
 			}
-			c.Close()
+			done := make(chan struct{})
+			go func() {
+				if err := c.Connect(); err != nil {
+					log.Printf("disconnected: %v", err)
+				}
+				c.Close()
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-reload:
+				c.Close()
+				log.Printf("Config reloaded — reconnecting...")
+				attempt = 0
+				continue
+			}
 		}
 
 		attempt++
 		wait := time.Duration(math.Min(float64(30*time.Second), float64(time.Duration(attempt)*2*time.Second)))
 		log.Printf("Reconnecting in %s...", wait)
-		time.Sleep(wait)
+
+		select {
+		case <-time.After(wait):
+		case <-reload:
+			log.Printf("Config reloaded — reconnecting...")
+			attempt = 0
+		}
 	}
 }
 

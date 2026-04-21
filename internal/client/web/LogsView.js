@@ -2,7 +2,25 @@ function LogsView() {
   const [logs, setLogs] = useState([]);
   const [live, setLive] = useState(true);
   const [levelFilter, setLevelFilter] = useState('ALL');
-  const bottomRef = useRef(null);
+  const scrollRef = useRef(null);
+  const userScrolled = useRef(false);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      userScrolled.current = !atBottom;
+    };
+    el.addEventListener('scroll', onScroll);
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (userScrolled.current) return;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [logs]);
 
   useEffect(() => {
     if (!live) return;
@@ -14,11 +32,10 @@ function LogsView() {
           const formatted = raw.map(r => {
              const d = new Date(r.time);
              const t = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
-             
+
              let level = 'INFO';
              let msg = r.action;
              if (r.protocol === 'DAEMON') {
-               // keep msg as is
                if (msg.includes('error') || msg.includes('fail')) level = 'ERROR';
              } else {
                msg = `${r.protocol} traffic from ${r.remote_addr} [${r.forward_id}] — ${r.action}`;
@@ -59,7 +76,7 @@ function LogsView() {
         </button>
         <button onClick={() => setLogs([])} style={{ background: 'none', border: '1px solid var(--border2)', padding: '5px 10px', color: 'var(--text-dim)', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--sans)' }}>Clear</button>
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 24px', fontFamily: 'var(--mono)', fontSize: 11.5, lineHeight: 1.8 }}>
+      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '8px 24px', fontFamily: 'var(--mono)', fontSize: 11.5, lineHeight: 1.8 }}>
         {filtered.map((l, i) => (
           <div key={i} style={{ display: 'flex', gap: 14, padding: '2px 0', borderBottom: '1px solid var(--border)10' }}>
             <span style={{ color: 'var(--text-dim)', flexShrink: 0, userSelect: 'none' }}>{l.t}</span>
@@ -68,7 +85,6 @@ function LogsView() {
           </div>
         ))}
         {filtered.length === 0 && <div style={{ color: 'var(--text-dim)', textAlign: 'center', marginTop: 40, fontFamily: 'var(--sans)' }}>No traffic logged yet.</div>}
-        <div ref={bottomRef} />
       </div>
     </div>
   );

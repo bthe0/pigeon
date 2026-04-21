@@ -26,6 +26,9 @@ func randomID(n int) string {
 	return string(b)
 }
 
+// AgentVersion is set at build time or by main before starting the web interface.
+var AgentVersion = "dev"
+
 func StartWebInterface(addr string) error {
 	subFS, err := fs.Sub(webFS, "web")
 	if err != nil {
@@ -33,16 +36,27 @@ func StartWebInterface(addr string) error {
 	}
 	http.Handle("/", http.FileServer(http.FS(subFS)))
 
-	http.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
+	noCache := func(h http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-store")
+			h(w, r)
+		}
+	}
+
+	http.HandleFunc("/api/config", noCache(func(w http.ResponseWriter, r *http.Request) {
 		cfg, err := LoadConfig()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		json.NewEncoder(w).Encode(cfg)
-	})
+		type configResponse struct {
+			*Config
+			Version string `json:"version"`
+		}
+		json.NewEncoder(w).Encode(configResponse{Config: cfg, Version: AgentVersion})
+	}))
 
-	http.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/api/logs", noCache(func(w http.ResponseWriter, r *http.Request) {
 		filter := r.URL.Query().Get("filter")
 		logs, err := FetchRecentLogs(filter, 100)
 		if err != nil {
@@ -51,7 +65,7 @@ func StartWebInterface(addr string) error {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(logs)
-	})
+	}))
 
 	http.HandleFunc("/api/forwards", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
@@ -63,6 +77,7 @@ func StartWebInterface(addr string) error {
 			LocalAddr  string         `json:"local_addr"`
 			Domain     string         `json:"domain"`
 			RemotePort int            `json:"remote_port"`
+			Expose     string         `json:"expose"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -81,6 +96,7 @@ func StartWebInterface(addr string) error {
 			LocalAddr:  req.LocalAddr,
 			Domain:     req.Domain,
 			RemotePort: req.RemotePort,
+			Expose:     req.Expose,
 		}
 		if err := cfg.AddForward(rule); err != nil {
 			http.Error(w, string(err.Error()), http.StatusBadRequest)
@@ -90,6 +106,7 @@ func StartWebInterface(addr string) error {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		DaemonReload()
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -115,6 +132,7 @@ func StartWebInterface(addr string) error {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+			DaemonReload()
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -126,6 +144,16 @@ func StartWebInterface(addr string) error {
 				return
 			}
 			rule.ID = id
+			// preserve server-assigned public address across edits
+			for _, f := range cfg.Forwards {
+				if f.ID == id {
+					rule.PublicAddr = f.PublicAddr
+					if rule.Expose == "" {
+						rule.Expose = f.Expose
+					}
+					break
+				}
+			}
 			if err := cfg.UpdateForward(id, rule); err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
@@ -134,6 +162,7 @@ func StartWebInterface(addr string) error {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+			DaemonReload()
 			w.WriteHeader(http.StatusOK)
 			return
 		}

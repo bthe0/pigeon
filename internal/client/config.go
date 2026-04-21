@@ -10,18 +10,22 @@ import (
 )
 
 type ForwardRule struct {
-	ID         string        `json:"id"`
+	ID         string         `json:"id"`
 	Protocol   proto.Protocol `json:"protocol"`
-	LocalAddr  string        `json:"local_addr"`
+	LocalAddr  string         `json:"local_addr"`
 	Domain     string         `json:"domain,omitempty"`
 	RemotePort int            `json:"remote_port,omitempty"`
 	Disabled   bool           `json:"disabled,omitempty"`
+	PublicAddr string         `json:"public_addr,omitempty"`  // assigned by server after connect
+	Expose     string         `json:"expose,omitempty"`       // "both" | "http" | "https"; default "both"
 }
 
 type Config struct {
-	Server   string        `json:"server"`   // host:port
-	Token    string        `json:"token"`
-	Forwards []ForwardRule `json:"forwards"`
+	Server     string        `json:"server"`               // host:port
+	Token      string        `json:"token"`
+	LocalDev   bool          `json:"local_dev"`            // true when running in local dev mode (self-signed TLS)
+	BaseDomain string        `json:"base_domain,omitempty"` // base domain for auto-assigned tunnel URLs
+	Forwards   []ForwardRule `json:"forwards"`
 }
 
 func configDir() (string, error) {
@@ -111,6 +115,15 @@ func (cfg *Config) RemoveForward(id string) bool {
 		}
 	}
 	return false
+}
+
+func (cfg *Config) SetPublicAddr(id, publicAddr string) {
+	for i := range cfg.Forwards {
+		if cfg.Forwards[i].ID == id {
+			cfg.Forwards[i].PublicAddr = publicAddr
+			return
+		}
+	}
 }
 
 func (cfg *Config) UpdateForward(id string, rule ForwardRule) error {

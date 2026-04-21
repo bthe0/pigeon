@@ -30,7 +30,13 @@ type Config struct {
 	Token       string
 	Domain      string // base domain for auto subdomains, e.g. "tun.example.com"
 	CertDir     string // directory to store ACME certs
+	CertFile    string // path to TLS cert PEM (overrides ACME)
+	KeyFile     string // path to TLS key PEM (overrides ACME)
 	LogFile     string // path to traffic log file, "" = stdout
+
+	// OnForwardRegistered is called whenever an HTTP tunnel domain is registered.
+	// Used in local-dev mode to add /etc/hosts entries dynamically.
+	OnForwardRegistered func(domain string)
 }
 
 type forward struct {
@@ -40,6 +46,7 @@ type forward struct {
 	publicAddr string
 	domain     string
 	port       int
+	expose     string // "both" | "http" | "https"
 	session    *session
 }
 
@@ -185,16 +192,20 @@ func (s *Server) registerForward(sess *session, p *proto.ForwardPayload) (string
 		session:   sess,
 		domain:    p.Domain,
 		port:      p.RemotePort,
+		expose:    p.Expose,
 	}
 
 	switch p.Protocol {
-	case proto.ProtoHTTP:
+	case proto.ProtoHTTP, proto.ProtoHTTPS:
 		domain := p.Domain
 		if domain == "" {
 			domain = randomID(8) + "." + s.cfg.Domain
 		}
 		fwd.publicAddr = domain
 		s.sessions.Store("http:"+domain, fwd)
+		if s.cfg.OnForwardRegistered != nil {
+			s.cfg.OnForwardRegistered(domain)
+		}
 
 	case proto.ProtoTCP, proto.ProtoUDP:
 		port, err := s.openPort(fwd)
@@ -221,7 +232,7 @@ func (s *Server) removeForward(sess *session, id string) {
 	sess.mu.Unlock()
 
 	if ok {
-		s.sessions.Delete("http:" + fwd.domain)
+		s.sessions.Delete("http:" + fwd.publicAddr)
 		s.forwards.Delete(id)
 		log.Printf("[%s] removed forward %s", sess.id, id)
 	}
@@ -231,7 +242,7 @@ func (s *Server) cleanupSession(sess *session) {
 	sess.mu.RLock()
 	defer sess.mu.RUnlock()
 	for _, fwd := range sess.forwards {
-		s.sessions.Delete("http:" + fwd.domain)
+		s.sessions.Delete("http:" + fwd.publicAddr)
 		s.forwards.Delete(fwd.id)
 	}
 }
@@ -352,18 +363,23 @@ func (s *Server) serveHTTP() error {
 }
 
 func (s *Server) serveHTTPS() error {
+	srv := &http.Server{
+		Addr:    s.cfg.HTTPSAddr,
+		Handler: s,
+		// Disable HTTP/2: the backend yamux transport only speaks HTTP/1.1,
+		// and the Go stdlib auto-negotiates HTTP/2 on TLS which breaks the proxy.
+		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
+	}
+	if s.cfg.CertFile != "" && s.cfg.KeyFile != "" {
+		log.Printf("HTTPS listening on %s (self-signed)", s.cfg.HTTPSAddr)
+		return srv.ListenAndServeTLS(s.cfg.CertFile, s.cfg.KeyFile)
+	}
 	m := &autocert.Manager{
 		Prompt:     autocert.AcceptTOS,
 		HostPolicy: autocert.HostWhitelist(s.cfg.Domain, "*."+s.cfg.Domain),
 		Cache:      autocert.DirCache(s.cfg.CertDir),
 	}
-	srv := &http.Server{
-		Addr:    s.cfg.HTTPSAddr,
-		Handler: s,
-		TLSConfig: &tls.Config{
-			GetCertificate: m.GetCertificate,
-		},
-	}
+	srv.TLSConfig = &tls.Config{GetCertificate: m.GetCertificate}
 	log.Printf("HTTPS listening on %s", s.cfg.HTTPSAddr)
 	return srv.ListenAndServeTLS("", "")
 }
@@ -380,6 +396,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fwd := v.(*forward)
+
+	isTLS := r.TLS != nil
+	switch fwd.expose {
+	case "https":
+		if !isTLS {
+			http.Redirect(w, r, "https://"+host+r.RequestURI, http.StatusMovedPermanently)
+			return
+		}
+	case "http":
+		if isTLS {
+			http.Error(w, "tunnel not available over HTTPS", http.StatusNotFound)
+			return
+		}
+	}
 
 	stream, err := fwd.session.mux.Open()
 	if err != nil {

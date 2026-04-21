@@ -8,12 +8,17 @@ import (
 	"time"
 
 	"github.com/bthe0/pigeon/internal/client"
+	"github.com/bthe0/pigeon/internal/localdev"
 	"github.com/bthe0/pigeon/internal/proto"
 	"github.com/bthe0/pigeon/internal/server"
 	"github.com/spf13/cobra"
 )
 
+// version is set via -ldflags "-X main.version=x.y.z" at build time.
+var version = "dev"
+
 func main() {
+	client.AgentVersion = version
 	// If running as daemon worker, skip CLI
 	if client.IsDaemon() {
 		cfg, err := client.LoadConfig()
@@ -31,6 +36,7 @@ func main() {
 
 	root.AddCommand(
 		serverCmd(),
+		devCmd(),
 		initCmd(),
 		daemonCmd(),
 		forwardCmd(),
@@ -182,9 +188,9 @@ func forwardCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			protocol := proto.Protocol(args[0])
 			switch protocol {
-			case proto.ProtoHTTP, proto.ProtoTCP, proto.ProtoUDP:
+			case proto.ProtoHTTP, proto.ProtoHTTPS, proto.ProtoTCP, proto.ProtoUDP:
 			default:
-				return fmt.Errorf("protocol must be http, tcp, or udp")
+				return fmt.Errorf("protocol must be http, https, tcp, or udp")
 			}
 
 			cfg, err := client.LoadConfig()
@@ -344,6 +350,92 @@ func webCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:8080", "Address to run the web interface on")
+	return cmd
+}
+
+// ── pigeon dev ─────────────────────────────────────────────────────────────────
+
+func devCmd() *cobra.Command {
+	var controlAddr, httpAddr, httpsAddr, token, domain, certDir, logFile string
+
+	cmd := &cobra.Command{
+		Use:   "dev",
+		Short: "Run server + client locally with self-signed certs and /etc/hosts entries",
+		Long: `Starts pigeon in local-dev mode:
+  • Generates a self-signed certificate for <domain> and *.<domain>
+  • Adds 127.0.0.1 <domain> to /etc/hosts (requires write access, run with sudo)
+  • Adds an /etc/hosts entry for each tunnel as it registers
+  • Starts the server with TLS using the self-signed cert
+
+Example:
+  sudo pigeon dev --token secret
+  sudo pigeon dev --domain myapp.local --token secret`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if token == "" {
+				return fmt.Errorf("--token is required")
+			}
+			if certDir == "" {
+				home, _ := os.UserHomeDir()
+				certDir = home + "/.pigeon/dev-certs"
+			}
+
+			certFile, keyFile, err := localdev.GenerateCert(domain, certDir)
+			if err != nil {
+				return fmt.Errorf("generate cert: %w", err)
+			}
+			log.Printf("Self-signed cert written to %s", certDir)
+
+			// Set up DNS resolver so *.domain resolves to 127.0.0.1 without /etc/hosts wildcards.
+			if err := localdev.SetupResolver(domain); err != nil {
+				log.Printf("Warning: could not write /etc/resolver/%s (%v) — run with sudo", domain, err)
+			} else {
+				log.Printf("DNS resolver configured for *.%s", domain)
+			}
+			go func() {
+				if err := localdev.StartDNS(domain); err != nil {
+					log.Printf("DNS server error: %v", err)
+				}
+			}()
+
+			// Write client config so the daemon and web UI know we're in local dev mode.
+			devCfg := &client.Config{
+				Server:     controlAddr,
+				Token:      token,
+				LocalDev:   true,
+				BaseDomain: domain,
+			}
+			if existing, err := client.LoadConfig(); err == nil {
+				devCfg.Forwards = existing.Forwards
+			}
+			if err := client.SaveConfig(devCfg); err != nil {
+				log.Printf("Warning: could not save client config: %v", err)
+			}
+
+			s := server.New(server.Config{
+				ControlAddr: controlAddr,
+				HTTPAddr:    httpAddr,
+				HTTPSAddr:   httpsAddr,
+				Token:       token,
+				Domain:      domain,
+				CertDir:     certDir,
+				CertFile:    certFile,
+				KeyFile:     keyFile,
+				LogFile:     logFile,
+				OnForwardRegistered: func(subdomain string) {
+					log.Printf("Tunnel ready: https://%s", subdomain)
+				},
+			})
+			return s.Start()
+		},
+	}
+
+	cmd.Flags().StringVar(&controlAddr, "control", "127.0.0.1:2222", "Control plane listen address")
+	cmd.Flags().StringVar(&httpAddr, "http", "127.0.0.1:80", "HTTP listen address")
+	cmd.Flags().StringVar(&httpsAddr, "https", "127.0.0.1:443", "HTTPS listen address")
+	cmd.Flags().StringVar(&token, "token", "", "Shared auth token (required)")
+	cmd.Flags().StringVar(&domain, "domain", "pigeon.local", "Local base domain")
+	cmd.Flags().StringVar(&certDir, "cert-dir", "", "Directory for dev certs (default ~/.pigeon/dev-certs)")
+	cmd.Flags().StringVar(&logFile, "log", "", "Traffic log file (default: stdout)")
 	return cmd
 }
 

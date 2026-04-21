@@ -10,7 +10,7 @@ function TunnelDetail({ tunnel, onClose }) {
       <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
         {[
           ['ID', tunnel.id],
-          ['Public Endpoint', `${tunnel.proto}://${tunnel.publicUrl}`],
+          ['Public Endpoint', tunnel.publicUrl ? `${tunnel.urlScheme}://${tunnel.publicUrl}` : 'auto-assigned (start daemon)'],
           ['Protocol', tunnel.proto.toUpperCase()],
           ['Status', tunnel.status],
           ['Requests', tunnel.requests.toLocaleString()],
@@ -26,7 +26,7 @@ function TunnelDetail({ tunnel, onClose }) {
   );
 }
 
-function StatsBar({ tunnels, server }) {
+function StatsBar({ tunnels, server, version }) {
   const online = tunnels.length;
   const totalReqs = tunnels.reduce((a, t) => a + t.requests, 0);
   return (
@@ -34,7 +34,7 @@ function StatsBar({ tunnels, server }) {
       {[
         { label: 'Active Tunnels', value: `${online} connected`, accent: true },
         { label: 'Total Mocks', value: totalReqs.toLocaleString() },
-        { label: 'Agent', value: 'v2.4.2' },
+        { label: 'Agent', value: version || 'dev' },
         { label: 'Pigeon Server', value: server || 'Unknown Server' },
       ].map((s, i) => (
         <div key={i} style={{ padding: '8px 24px', borderRight: '1px solid var(--border)', minWidth: 120 }}>
@@ -65,24 +65,39 @@ function App() {
       const cfg = await res.json();
       setRawConfig(cfg);
       
+      const isLocal = !!cfg.local_dev;
+      const baseDomain = cfg.base_domain || '';
       const parsedTunnels = (cfg.forwards || []).map(f => {
         let pubUrl = '';
-        if (f.protocol === 'http') pubUrl = f.domain || '(auto domain)';
-        else pubUrl = f.remote_port > 0 ? `Port ${f.remote_port}` : '(auto port)';
-        
+        let urlScheme = 'https';
+        const expose = f.expose || 'both';
+        if (f.protocol === 'http' || f.protocol === 'https') {
+          let raw = f.public_addr || f.domain || (baseDomain ? `${f.id}.${baseDomain}` : null);
+          // if the stored value has no dot (e.g. a short label without base domain), append it
+          if (raw && baseDomain && !raw.includes('.')) raw = `${raw}.${baseDomain}`;
+          pubUrl = raw;
+          urlScheme = expose === 'http' ? 'http' : 'https';
+        } else {
+          pubUrl = f.public_addr || (f.remote_port > 0 ? `Port ${f.remote_port}` : null);
+          urlScheme = f.protocol;
+        }
+
         return {
           id: f.id,
           name: f.id,
           proto: f.protocol,
           localPort: f.local_addr,
           publicUrl: pubUrl,
-          status: f.disabled ? 'offline' : 'online', 
+          urlScheme,
+          isLocal,
+          status: f.disabled ? 'offline' : 'online',
           disabled: f.disabled,
           domain: f.domain,
           remotePort: f.remote_port,
+          expose: f.expose || 'both',
           region: 'auto',
-          requests: Math.floor(Math.random() * 500), 
-          bandwidth: (Math.random() * 10).toFixed(1) + ' MB', 
+          requests: Math.floor(Math.random() * 500),
+          bandwidth: (Math.random() * 10).toFixed(1) + ' MB',
           tags: [f.protocol]
         };
       });
@@ -112,11 +127,11 @@ function App() {
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
-      <StatsBar tunnels={tunnels} server={rawConfig?.server} />
+      <StatsBar tunnels={tunnels} server={rawConfig?.server} version={rawConfig?.version} />
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
         <Sidebar active={activeNav} setActive={v => { setActiveNav(v); setSelectedTunnel(null); }} />
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
-          {activeNav === 'tunnels' && <TunnelsView tunnels={tunnels} reloadConfig={loadConfig} onSelectTunnel={t => setSelectedTunnel(t)} />}
+          {activeNav === 'tunnels' && <TunnelsView tunnels={tunnels} reloadConfig={loadConfig} onSelectTunnel={t => setSelectedTunnel(t)} baseDomain={rawConfig?.base_domain || ''} />}
           {activeNav === 'logs' && <LogsView />}
           {activeNav === 'settings' && <SettingsView config={rawConfig} />}
           {selectedTunnel && activeNav === 'tunnels' && <TunnelDetail tunnel={selectedTunnel} onClose={() => setSelectedTunnel(null)} />}

@@ -1,7 +1,7 @@
-function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
+function TunnelsView({ tunnels, reloadConfig, onSelectTunnel, baseDomain }) {
   const [newOpen, setNewOpen] = useState(false);
   const [editId, setEditId] = useState(null);
-  const [form, setForm] = useState({ localAddr: '', domain: '', port: '', proto: 'http', disabled: false });
+  const [form, setForm] = useState({ localAddr: '', domain: '', port: '', proto: 'http', disabled: false, expose: 'both' });
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [deleteId, setDeleteId] = useState(null);
@@ -29,12 +29,17 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
     if (!form.localAddr) return;
     setIsAdding(true);
     try {
+      let domainVal = form.domain || undefined;
+      if (domainVal && baseDomain && !domainVal.includes('.')) {
+        domainVal = `${domainVal}.${baseDomain}`;
+      }
       const payload = {
         protocol: form.proto,
         local_addr: form.localAddr,
-        domain: form.domain || undefined,
+        domain: domainVal,
         remote_port: form.port ? parseInt(form.port) : 0,
-        disabled: !!form.disabled
+        disabled: !!form.disabled,
+        expose: form.expose || 'both'
       };
       const url = editId ? `/api/forwards/${editId}` : `/api/forwards`;
       const res = await fetch(url, {
@@ -44,7 +49,7 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
       });
       if(!res.ok) throw new Error(await res.text());
       
-      setForm({ localAddr: '', domain: '', port: '', proto: 'http', disabled: false });
+      setForm({ localAddr: '', domain: '', port: '', proto: 'http', disabled: false, expose: 'both' });
       setNewOpen(false);
       setEditId(null);
       await reloadConfig();
@@ -61,7 +66,8 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
         local_addr: t.localPort,
         domain: t.domain || undefined,
         remote_port: t.remotePort ? parseInt(t.remotePort) : 0,
-        disabled: !t.disabled
+        disabled: !t.disabled,
+        expose: t.expose || 'both'
       };
       const res = await fetch(`/api/forwards/${t.id}`, {
         method: 'PUT',
@@ -75,8 +81,32 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
     }
   }
 
+  async function cycleExpose(t) {
+    const sslOn = t.expose !== 'http';
+    const next = sslOn ? 'http' : 'both';
+    try {
+      const payload = {
+        protocol: t.proto,
+        local_addr: t.localPort,
+        domain: t.domain || undefined,
+        remote_port: t.remotePort ? parseInt(t.remotePort) : 0,
+        disabled: !!t.disabled,
+        expose: next
+      };
+      const res = await fetch(`/api/forwards/${t.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if(!res.ok) throw new Error(await res.text());
+      await reloadConfig();
+    } catch(err) {
+      alert("Error updating expose: " + err.message);
+    }
+  }
+
   function openEdit(t) {
-    setForm({ localAddr: t.localPort, domain: t.domain || '', port: t.remotePort || '', proto: t.proto, disabled: !!t.disabled });
+    setForm({ localAddr: t.localPort, domain: t.domain || '', port: t.remotePort || '', proto: t.proto, disabled: !!t.disabled, expose: t.expose || 'both' });
     setEditId(t.id);
     setNewOpen(true);
   }
@@ -107,15 +137,15 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '16px 1fr 80px 100px 90px 90px 100px', gap: '0 12px', padding: '6px 24px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-        {['', 'Local Target / URL', 'Proto', 'ID', 'Requests', 'Bandwidth', 'Actions'].map((h,i) => (
+      <div style={{ display: 'grid', gridTemplateColumns: '16px 50px 1fr 80px 100px 90px 90px 90px', gap: '0 12px', padding: '6px 24px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        {['', 'SSL', 'Local Target / URL', 'Proto', 'ID', 'Requests', 'Bandwidth', 'Actions'].map((h,i) => (
           <div key={i} style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)' }}>{h}</div>
         ))}
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {filtered.map(t => (
-          <TunnelRow key={t.id} tunnel={t} onDelete={setDeleteId} onToggle={toggleTunnel} onEdit={openEdit} onClick={() => onSelectTunnel(t)} />
+          <TunnelRow key={t.id} tunnel={t} onDelete={setDeleteId} onToggle={toggleTunnel} onEdit={openEdit} onCycleExpose={cycleExpose} onClick={() => onSelectTunnel(t)} />
         ))}
         {filtered.length === 0 && (
           <div style={{ padding: '40px 24px', textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>No tunnels found</div>
@@ -136,6 +166,7 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
               <select value={form.proto} onChange={e => setForm(x => ({...x, proto: e.target.value}))} disabled={isAdding}
                 style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }}>
                 <option value="http">HTTP</option>
+                <option value="https">HTTPS (local TLS service)</option>
                 <option value="tcp">TCP</option>
                 <option value="udp">UDP</option>
               </select>
@@ -147,11 +178,16 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
                 style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }} />
             </div>
             
-            {form.proto === 'http' ? (
+            {(form.proto === 'http' || form.proto === 'https') ? (
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Domain (Optional)</label>
-                <input value={form.domain} onChange={e => setForm(x => ({...x, domain: e.target.value}))} placeholder="myapp.tunnel.dev" disabled={isAdding}
-                  style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }} />
+                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border2)', background: 'var(--panel2)' }}>
+                  <input value={form.domain} onChange={e => setForm(x => ({...x, domain: e.target.value}))} placeholder={baseDomain ? 'myapp' : 'myapp.tunnel.dev'} disabled={isAdding}
+                    style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }} />
+                  {baseDomain && !form.domain.includes('.') && (
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--text-dim)', padding: '8px 10px 8px 0', whiteSpace: 'nowrap' }}>.{baseDomain}</span>
+                  )}
+                </div>
               </div>
             ) : (
               <div style={{ marginBottom: 14 }}>
@@ -192,20 +228,33 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
   );
 }
 
-function TunnelRow({ tunnel: t, onDelete, onToggle, onEdit, onClick }) {
+function TunnelRow({ tunnel: t, onDelete, onToggle, onEdit, onCycleExpose, onClick }) {
   const [hovered, setHovered] = useState(false);
+  const isHTTP = t.proto === 'http' || t.proto === 'https';
+  const sslOn = isHTTP && t.expose !== 'http';
   return (
     <div onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onClick={onClick}
-      style={{ display: 'grid', gridTemplateColumns: '16px 1fr 80px 100px 90px 90px 100px', gap: '0 12px', padding: '10px 24px', borderBottom: '1px solid var(--border)', cursor: 'pointer', background: hovered ? 'var(--panel2)' : 'transparent', transition: 'background .1s', alignItems: 'center', opacity: t.disabled ? 0.6 : 1 }}>
+      style={{ display: 'grid', gridTemplateColumns: '16px 50px 1fr 80px 100px 90px 90px 90px', gap: '0 12px', padding: '10px 24px', borderBottom: '1px solid var(--border)', cursor: 'pointer', background: hovered ? 'var(--panel2)' : 'transparent', transition: 'background .1s', alignItems: 'center', opacity: t.disabled ? 0.6 : 1 }}>
       <StatusDot status={t.status} />
+      <div>
+        {isHTTP && (
+          <button onClick={e=>{e.stopPropagation();onCycleExpose(t);}} title={sslOn ? 'SSL on — click to disable' : 'SSL off — click to enable'}
+            style={{ background: 'none', border: `1px solid ${sslOn ? '#51d88a' : 'var(--border2)'}`, padding: '4px 6px', cursor: 'pointer', color: sslOn ? '#51d88a' : 'var(--text-dim)', display: 'flex', alignItems: 'center' }}>
+            <Icon d={Icons.lock} size={11} color="currentColor" />
+          </button>
+        )}
+      </div>
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 13, fontWeight: 500, color: '#fff' }}>{t.localPort}</span>
           {t.tags.map(tag => <Pill key={tag} color={tag==='prod'?'#ff4d4d':tag==='db'?'#f5c542':'#4d9fff'}>{tag}</Pill>)}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-dim)' }}>{t.proto}://{t.publicUrl}</span>
-          <CopyBtn text={`${t.proto}://${t.publicUrl}`} />
+          {t.publicUrl
+            ? <><span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-dim)' }}>{t.urlScheme}://{t.publicUrl}</span><CopyBtn text={`${t.urlScheme}://${t.publicUrl}`} /></>
+            : <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>auto-assigned</span>
+          }
+          {t.isLocal && <Pill color="#7c5cfc">local</Pill>}
         </div>
       </div>
       <div><Pill color={PROTO_COLORS[t.proto] || '#9ba39c'}>{t.proto}</Pill></div>
@@ -214,15 +263,15 @@ function TunnelRow({ tunnel: t, onDelete, onToggle, onEdit, onClick }) {
       <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-mid)' }}>{t.bandwidth}</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <button onClick={e=>{e.stopPropagation();onToggle(t);}}
-          style={{ background: 'none', border: '1px solid var(--border2)', padding: '4px 6px', cursor: 'pointer', color: t.disabled ? 'var(--text-dim)' : 'var(--accent)', display: 'flex', alignItems: 'center', title: t.disabled ? 'Enable' : 'Disable' }}>
+          style={{ background: 'none', border: '1px solid var(--border2)', padding: '4px 6px', cursor: 'pointer', color: t.disabled ? 'var(--text-dim)' : 'var(--accent)', display: 'flex', alignItems: 'center' }}>
           <Icon d={t.disabled ? Icons.toggleOff : Icons.toggleOn} size={13} color="currentColor" />
         </button>
         <button onClick={e=>{e.stopPropagation();onEdit(t);}}
-          style={{ background: 'none', border: '1px solid var(--border2)', padding: '4px 6px', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', alignItems: 'center', title: 'Edit' }}>
+          style={{ background: 'none', border: '1px solid var(--border2)', padding: '4px 6px', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', alignItems: 'center' }}>
           <Icon d={Icons.edit} size={11} color="currentColor" />
         </button>
         <button onClick={e=>{e.stopPropagation();onDelete(t.id);}}
-          style={{ background: 'none', border: '1px solid var(--border2)', padding: '4px 6px', cursor: 'pointer', color: '#ff4d4d88', display: 'flex', alignItems: 'center', title: 'Delete' }}>
+          style={{ background: 'none', border: '1px solid var(--border2)', padding: '4px 6px', cursor: 'pointer', color: '#ff4d4d88', display: 'flex', alignItems: 'center' }}>
           <Icon d={Icons.trash} size={11} color="#ff4d4d" />
         </button>
       </div>
