@@ -57,7 +57,7 @@ const Icon = ({ d, size = 16, color = 'currentColor', style = {} }) => (
 );
 
 const Icons = {
-  tunnel:  'd M 3 12 h 18 M 12 3 c-2.5 2.5-4 6-4 9s1.5 6.5 4 9 M 12 3 c2.5 2.5 4 6 4 9s-1.5 6.5-4 9',
+  tunnel:  'M 3 12 h 18 M 12 3 c-2.5 2.5-4 6-4 9s1.5 6.5 4 9 M 12 3 c2.5 2.5 4 6 4 9s-1.5 6.5-4 9',
   plus:    'M 12 5 v14 M 5 12 h14',
   stop:    'M 5 5 h14 v14 H 5z',
   play:    'M 5 3 l14 9-14 9 z',
@@ -374,7 +374,7 @@ function SettingsView({ config }) {
         <Section title="Authentication & Server">
           <Field label="Auth Token" sub="Used to authenticate your tunnel agent">
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input readOnly value={showToken ? authToken : '•'.repeat(Math.max(10, min(authTokens?authToken.length:0, 20)))}
+              <input readOnly value={showToken ? authToken : '•'.repeat(Math.max(10, min(authToken?authToken.length:0, 20)))}
                 style={{ flex: 1, background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '7px 10px', fontSize: 12, fontFamily: 'var(--mono)', outline: 'none' }} />
               <button onClick={() => setShowToken(x=>!x)} style={{ background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text-mid)', padding: '7px 10px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--sans)', whiteSpace: 'nowrap' }}>{showToken ? 'Hide' : 'Reveal'}</button>
             </div>
@@ -476,11 +476,17 @@ function App() {
   const [tunnels, setTunnels] = useState([]);
   const [rawConfig, setRawConfig] = useState(null);
   const [selectedTunnel, setSelectedTunnel] = useState(null);
+  const [initError, setInitError] = useState(null);
   
   const loadConfig = async () => {
     try {
       const res = await fetch('/api/config');
-      if(!res.ok) throw new Error(await res.text());
+      if(!res.ok) {
+        const txt = await res.text();
+        if(txt.includes('not initialised')) setInitError(txt);
+        throw new Error(txt);
+      }
+      setInitError(null);
       const cfg = await res.json();
       setRawConfig(cfg);
       
@@ -512,6 +518,19 @@ function App() {
   useEffect(() => {
     loadConfig();
   }, []);
+
+  if (initError) {
+    return (
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', color: '#fff', flexDirection: 'column', gap: 20 }}>
+        <Icon d={Icons.zap} size={48} color="var(--accent)" />
+        <div style={{ fontSize: 24, fontWeight: 600 }}>Daemon Not Initialized</div>
+        <div style={{ color: 'var(--text-mid)', fontFamily: 'var(--mono)', fontSize: 13, background: 'var(--panel)', padding: '16px 24px', border: '1px solid var(--border)' }}>
+          {initError}
+        </div>
+        <button onClick={loadConfig} style={{ background: 'none', border: '1px solid var(--border2)', color: 'var(--text-dim)', padding: '8px 16px', cursor: 'pointer', marginTop: 10 }}>Retry Connection</button>
+      </div>
+    );
+  }
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
