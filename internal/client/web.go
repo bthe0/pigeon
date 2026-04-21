@@ -4,16 +4,17 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"time"
 
-	_ "embed"
+	"embed"
 
 	"github.com/bthe0/pigeon/internal/proto"
 )
 
-//go:embed web_index.html
-var indexHTML []byte
+//go:embed web/*
+var webFS embed.FS
 
 func randomID(n int) string {
 	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -26,14 +27,11 @@ func randomID(n int) string {
 }
 
 func StartWebInterface(addr string) error {
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html")
-		w.Write(indexHTML)
-	})
+	subFS, err := fs.Sub(webFS, "web")
+	if err != nil {
+		return err
+	}
+	http.Handle("/", http.FileServer(http.FS(subFS)))
 
 	http.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
 		cfg, err := LoadConfig()

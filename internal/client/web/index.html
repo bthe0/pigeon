@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pigeon — Control Panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0b0d0c;
+    --panel: #111412;
+    --panel2: #161917;
+    --border: #222522;
+    --border2: #2a2e2b;
+    --accent: #00e87a;
+    --accent-dim: #00e87a22;
+    --accent-mid: #00e87a55;
+    --red: #ff4d4d;
+    --yellow: #f5c542;
+    --blue: #4d9fff;
+    --text: #d8ddd9;
+    --text-dim: #6b7068;
+    --text-mid: #9ba39c;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+  }
+  html, body, #root { height: 100%; width: 100%; overflow: hidden; background: var(--bg); }
+  body { font-family: var(--sans); color: var(--text); }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+  @keyframes slideIn { from { transform: translateX(20px); opacity:0; } to { transform: translateX(0); opacity:1; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+  const { useState, useEffect, useRef, useCallback } = React;
+  const STATUS_COLORS = { online: '#00e87a', offline: '#6b7068', error: '#ff4d4d' };
+  const PROTO_COLORS = { https: '#4d9fff', tcp: '#f5c542', http: '#9b8fff', udp: '#10b981' };
+  function statusColor(s) { return s >= 500 ? '#ff4d4d' : s >= 400 ? '#f5c542' : s >= 200 ? '#00e87a' : '#9ba39c'; }
+</script>
+
+<script type="text/babel" src="Icons.js"></script>
+<script type="text/babel" src="Shared.js"></script>
+<script type="text/babel" src="Sidebar.js"></script>
+<script type="text/babel" src="TunnelsView.js"></script>
+<script type="text/babel" src="InspectorView.js"></script>
+<script type="text/babel" src="LogsView.js"></script>
+<script type="text/babel" src="SettingsView.js"></script>
+<script type="text/babel" src="App.js"></script>
+
+</body>
+</html>
