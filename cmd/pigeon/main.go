@@ -36,6 +36,7 @@ func main() {
 		forwardCmd(),
 		logsCmd(),
 		statusCmd(),
+		webCmd(),
 	)
 
 	if err := root.Execute(); err != nil {
@@ -329,6 +330,21 @@ func statusCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// ── pigeon web ─────────────────────────────────────────────────────────────────
+
+func webCmd() *cobra.Command {
+	var addr string
+	cmd := &cobra.Command{
+		Use:   "web",
+		Short: "Start the web configuration interface",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return client.StartWebInterface(addr)
+		},
+	}
+	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:8080", "Address to run the web interface on")
+	return cmd
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────────
