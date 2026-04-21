@@ -1,13 +1,21 @@
-# <img src="assets/logo.png" alt="Pigeon Logo" width="38" align="top" /> Pigeon
+<h1 align="center">
+  <img src="assets/logo.png" alt="Pigeon Logo" width="38" align="top" /> Pigeon
+</h1>
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/bthe0/pigeon)](https://goreportcard.com/report/github.com/bthe0/pigeon)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/bthe0/pigeon)](https://github.com/bthe0/pigeon)
-[![Awesome](https://awesome.re/badge.svg)](https://awesome.re)
+<p align="center">
+  <a href="https://goreportcard.com/report/github.com/bthe0/pigeon"><img src="https://goreportcard.com/badge/github.com/bthe0/pigeon" alt="Go Report Card"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="https://github.com/bthe0/pigeon"><img src="https://img.shields.io/github/go-mod/go-version/bthe0/pigeon" alt="Go Version"></a>
+  <a href="https://awesome.re"><img src="https://awesome.re/badge.svg" alt="Awesome"></a>
+</p>
 
-A lightweight, self-hosted tunnelling tool that exposes local services to the internet over **HTTP**, **TCP**, and **UDP** — no third-party services required.
+<p align="center">
+  A lightweight, self-hosted tunnelling tool that exposes local services to the internet over <strong>HTTP</strong>, <strong>TCP</strong>, and <strong>UDP</strong> — no third-party services required.
+</p>
 
-![Pigeon Web Dashboard](assets/dashboard.png)
+<p align="center">
+  <img src="assets/dashboard.png" alt="Pigeon Web Dashboard" />
+</p>
 
 ```
                   ┌─────────────┐        ┌─────────────┐
