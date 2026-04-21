@@ -375,8 +375,7 @@ Example:
 				return fmt.Errorf("--token is required")
 			}
 			if certDir == "" {
-				home, _ := os.UserHomeDir()
-				certDir = home + "/.pigeon/dev-certs"
+				certDir = localdev.DefaultCertDir()
 			}
 
 			certFile, keyFile, err := localdev.GenerateCert(domain, certDir)
@@ -429,13 +428,38 @@ Example:
 		},
 	}
 
-	cmd.Flags().StringVar(&controlAddr, "control", "127.0.0.1:2222", "Control plane listen address")
-	cmd.Flags().StringVar(&httpAddr, "http", "127.0.0.1:80", "HTTP listen address")
-	cmd.Flags().StringVar(&httpsAddr, "https", "127.0.0.1:443", "HTTPS listen address")
-	cmd.Flags().StringVar(&token, "token", "", "Shared auth token (required)")
-	cmd.Flags().StringVar(&domain, "domain", "pigeon.local", "Local base domain")
-	cmd.Flags().StringVar(&certDir, "cert-dir", "", "Directory for dev certs (default ~/.pigeon/dev-certs)")
-	cmd.Flags().StringVar(&logFile, "log", "", "Traffic log file (default: stdout)")
+	cmd.AddCommand(&cobra.Command{
+		Use:   "trust",
+		Short: "Trust the local dev self-signed certificate on macOS",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if certDir == "" {
+				certDir = localdev.DefaultCertDir()
+			}
+			certFile, _ := localdev.CertPaths(certDir)
+			if _, err := os.Stat(certFile); os.IsNotExist(err) {
+				var genErr error
+				certFile, _, genErr = localdev.GenerateCert(domain, certDir)
+				if genErr != nil {
+					return fmt.Errorf("generate cert: %w", genErr)
+				}
+			} else if err != nil {
+				return fmt.Errorf("stat cert: %w", err)
+			}
+			if err := localdev.TrustCert(certFile); err != nil {
+				return err
+			}
+			fmt.Printf("Trusted dev certificate: %s\n", certFile)
+			return nil
+		},
+	})
+
+	cmd.PersistentFlags().StringVar(&controlAddr, "control", "127.0.0.1:2222", "Control plane listen address")
+	cmd.PersistentFlags().StringVar(&httpAddr, "http", "127.0.0.1:80", "HTTP listen address")
+	cmd.PersistentFlags().StringVar(&httpsAddr, "https", "127.0.0.1:443", "HTTPS listen address")
+	cmd.PersistentFlags().StringVar(&token, "token", "", "Shared auth token (required for `pigeon dev`)")
+	cmd.PersistentFlags().StringVar(&domain, "domain", "pigeon.local", "Local base domain")
+	cmd.PersistentFlags().StringVar(&certDir, "cert-dir", "", "Directory for dev certs (default ~/.pigeon/dev-certs)")
+	cmd.PersistentFlags().StringVar(&logFile, "log", "", "Traffic log file (default: stdout)")
 	return cmd
 }
 

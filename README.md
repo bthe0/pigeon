@@ -20,6 +20,8 @@ internet ────────▶│  pigeon     │◀──────▶�
 - **TLS / Let's Encrypt** — automatic ACME certs on the server side
 - **Background daemon** — persistent connection with exponential-backoff reconnect
 - **Traffic logs** — structured NDJSON logs with `--since` / `--follow` / filter support
+- **Web control panel** — manage tunnels, inspect logs, and restart the daemon from a browser
+- **Local-dev mode** — run server + client locally with wildcard DNS and self-signed TLS
 - **Zero dependencies on the client** — single static binary
 
 ---
@@ -59,7 +61,7 @@ pigeon server \
 | `--domain` | *(required)* | Base domain, e.g. `tun.example.com` |
 | `--control` | `:2222` | Control-plane port |
 | `--http` | `:80` | HTTP tunnel port |
-| `--https` | *(disabled)* | HTTPS port — enables ACME autocert |
+| `--https` | `:443` | HTTPS port — enables ACME autocert |
 | `--cert-dir` | `/var/lib/pigeon/certs` | Directory for ACME certificates |
 | `--log` | stdout | Path to traffic log file |
 
@@ -79,6 +81,9 @@ pigeon forward add http localhost:3000
 
 # HTTP — custom subdomain
 pigeon forward add http localhost:3000 --domain myapp.tun.example.com
+
+# HTTPS upstream — local service already speaks TLS
+pigeon forward add https localhost:8443 --domain secure.tun.example.com
 
 # TCP — auto-assigned port
 pigeon forward add tcp localhost:5432
@@ -117,7 +122,7 @@ pigeon init --server <host:port> --token <tok>
 ### `pigeon forward` — Manage tunnel rules
 
 ```bash
-pigeon forward add <http|tcp|udp> <local-addr> [--domain <d>] [--port <p>]
+pigeon forward add <http|https|tcp|udp> <local-addr> [--domain <d>] [--port <p>]
 pigeon forward remove <id|domain|port>
 pigeon forward list
 ```
@@ -127,7 +132,35 @@ pigeon forward list
 ```bash
 pigeon web --addr 127.0.0.1:8080
 ```
-This opens a beautiful single-page dashboard where you can view, add, and delete configuration forwards, and easily restart the background daemon.
+This opens a browser-based dashboard where you can:
+
+- create, edit, enable, disable, and delete tunnels
+- inspect recent logs in the browser
+- restart the daemon from Settings
+- use short local-dev hostnames like `myapp`, which normalize to `myapp.<base-domain>`
+
+### `pigeon dev` — Run the full stack locally
+
+```bash
+sudo pigeon dev --token secret
+sudo pigeon dev --domain pigeon.local --token secret
+```
+
+Local-dev mode:
+
+- generates a self-signed certificate for `<domain>` and `*.<domain>`
+- starts the relay server locally on `127.0.0.1:2222`, `:80`, and `:443`
+- configures wildcard DNS via `/etc/resolver/<domain>`
+- writes client config so the daemon and web UI use the local relay automatically
+
+### `pigeon dev trust` — Trust the local dev certificate on macOS
+
+```bash
+sudo pigeon dev trust
+sudo pigeon dev trust --domain pigeon.local
+```
+
+This adds the generated self-signed certificate from `~/.pigeon/dev-certs/cert.pem` to the macOS System keychain.
 
 ### `pigeon daemon` — Manage the background process
 
@@ -192,16 +225,16 @@ All data flows over a single multiplexed TCP connection ([yamux](https://github.
 go test ./...
 ```
 
-All packages have unit tests. The `testtools/` directory contains standalone echo servers and clients for manual end-to-end testing:
+All packages have unit tests. The `tools/` directory contains standalone echo servers and clients for manual end-to-end testing:
 
 ```bash
 # TCP echo server / client
-go run testtools/tcpecho/main.go
-go run testtools/tcpclient/main.go localhost:<port> "hello"
+go run tools/tcpecho/main.go
+go run tools/tcpclient/main.go localhost:<port> "hello"
 
 # UDP echo server / client
-go run testtools/udpecho/main.go :19201
-go run testtools/udpclient/main.go localhost:<port> "hello"
+go run tools/udpecho/main.go :19201
+go run tools/udpclient/main.go localhost:<port> "hello"
 ```
 
 ---
@@ -215,7 +248,8 @@ pigeon/
 │   ├── proto/                  # Length-prefixed JSON wire protocol
 │   ├── server/                 # Tunnel server (control + HTTP + TCP/UDP)
 │   └── client/                 # Daemon, config, logs, tunnel client
-└── testtools/                  # Manual E2E test helpers
+├── tools/                      # Manual E2E echo helpers
+└── assets/                     # Branding / design assets
 ```
 
 ---

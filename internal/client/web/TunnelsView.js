@@ -13,19 +13,47 @@ function SkeletonRow() {
 }
 
 function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomain }) {
+  const emptyForm = { localAddr: '', domain: '', port: '', proto: 'http', disabled: false, expose: 'both' };
+  const localAddrRef = useRef(null);
   const [newOpen, setNewOpen] = useState(false);
   const [editId, setEditId] = useState(null);
-  const [form, setForm] = useState({ localAddr: '', domain: '', port: '', proto: 'http', disabled: false, expose: 'both' });
+  const [form, setForm] = useState(emptyForm);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [deleteId, setDeleteId] = useState(null);
   const [isAdding, setIsAdding] = useState(false);
+  const [formErrors, setFormErrors] = useState({});
 
   const filtered = tunnels.filter(t => {
     const matchStatus = filter === 'all' || t.status === filter;
     const matchSearch = !search || t.localPort.includes(search) || t.publicUrl.includes(search);
     return matchStatus && matchSearch;
   });
+
+  useEffect(() => {
+    if (!newOpen) return;
+    requestAnimationFrame(() => {
+      localAddrRef.current?.focus();
+      localAddrRef.current?.select?.();
+    });
+  }, [newOpen, editId]);
+
+  useEffect(() => {
+    if (!newOpen) return;
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape' && !isAdding) {
+        e.preventDefault();
+        setNewOpen(false);
+        return
+      }
+      if (e.key !== 'Enter' || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+      if (e.target && e.target.tagName === 'TEXTAREA') return;
+      e.preventDefault();
+      saveTunnel();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [newOpen, isAdding, form, editId]);
 
   async function confirmDelete() {
     if (!deleteId) return;
@@ -39,19 +67,71 @@ function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomai
     setDeleteId(null);
   }
 
+  function parsePortValue(value) {
+    if (!/^\d+$/.test(value)) return null;
+    const port = parseInt(value, 10);
+    if (port < 1 || port > 65535) return null;
+    return port;
+  }
+
+  function isValidLocalAddr(value) {
+    const trimmed = value.trim();
+    if (!trimmed || /\s/.test(trimmed)) return false;
+    const bracketed = trimmed.match(/^\[.+\]:(\d+)$/);
+    if (bracketed) return parsePortValue(bracketed[1]) !== null;
+    const idx = trimmed.lastIndexOf(':');
+    if (idx <= 0 || idx === trimmed.length - 1) return false;
+    return parsePortValue(trimmed.slice(idx + 1)) !== null;
+  }
+
+  function isValidDomain(value) {
+    if (!value) return true;
+    if (/\s/.test(value) || value.includes('://') || value.includes('/')) return false;
+    return value.split('.').every(part => /^[a-zA-Z0-9-]+$/.test(part) && !part.startsWith('-') && !part.endsWith('-'));
+  }
+
+  function validateForm() {
+    const errors = {};
+    const localAddr = form.localAddr.trim();
+    const isHTTP = form.proto === 'http' || form.proto === 'https';
+    const domain = form.domain.trim();
+    const port = String(form.port || '').trim();
+
+    if (!localAddr) {
+      errors.localAddr = 'Local address is required.';
+    } else if (!isValidLocalAddr(localAddr)) {
+      errors.localAddr = 'Use host:port, for example localhost:3000.';
+    }
+
+    if (isHTTP) {
+      if (domain && !isValidDomain(domain)) {
+        errors.domain = 'Use a hostname only, like myapp or myapp.pigeon.local.';
+      }
+    } else if (port && parsePortValue(port) === null) {
+      errors.port = 'Remote port must be between 1 and 65535.';
+    }
+
+    return errors;
+  }
+
   async function saveTunnel() {
-    if (!form.localAddr) return;
+    const errors = validateForm();
+    setFormErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+
     setIsAdding(true);
     try {
-      let domainVal = form.domain || undefined;
+      const localAddr = form.localAddr.trim();
+      let domainVal = form.domain.trim() || undefined;
       if (domainVal && baseDomain && !domainVal.includes('.')) {
         domainVal = `${domainVal}.${baseDomain}`;
       }
+      const remotePort = String(form.port || '').trim();
       const payload = {
         protocol: form.proto,
-        local_addr: form.localAddr,
+        local_addr: localAddr,
         domain: domainVal,
-        remote_port: form.port ? parseInt(form.port) : 0,
+        remote_port: remotePort ? parseInt(remotePort, 10) : 0,
         disabled: !!form.disabled,
         expose: form.expose || 'both'
       };
@@ -63,7 +143,8 @@ function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomai
       });
       if(!res.ok) throw new Error(await res.text());
       
-      setForm({ localAddr: '', domain: '', port: '', proto: 'http', disabled: false, expose: 'both' });
+      setForm(emptyForm);
+      setFormErrors({});
       setNewOpen(false);
       setEditId(null);
       await reloadConfig();
@@ -120,6 +201,7 @@ function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomai
   }
 
   function openEdit(t) {
+    setFormErrors({});
     setForm({ localAddr: t.localPort, domain: t.domain || '', port: t.remotePort || '', proto: t.proto, disabled: !!t.disabled, expose: t.expose || 'both' });
     setEditId(t.id);
     setNewOpen(true);
@@ -136,7 +218,7 @@ function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomai
         </div>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…"
           style={{ background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '6px 10px', fontSize: 12, fontFamily: 'var(--sans)', width: 160, outline: 'none' }} />
-        <button onClick={() => { setEditId(null); setForm({ localAddr: '', domain: '', port: '', proto: 'http', disabled: false }); setNewOpen(true); }}
+        <button onClick={() => { setEditId(null); setForm(emptyForm); setFormErrors({}); setNewOpen(true); }}
           style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--accent)', border: 'none', color: '#000', padding: '7px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', letterSpacing: '.02em' }}>
           <Icon d={Icons.plus} size={13} color="#000" /> New Tunnel
         </button>
@@ -170,10 +252,10 @@ function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomai
       {newOpen && (
         <div style={{ position: 'absolute', inset: 0, background: '#00000088', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
           onClick={() => !isAdding && setNewOpen(false)}>
-          <div style={{ background: 'var(--panel)', border: '1px solid var(--border2)', width: 420, padding: 24 }} onClick={e=>e.stopPropagation()}>
+          <form style={{ background: 'var(--panel)', border: '1px solid var(--border2)', width: 420, padding: 24 }} onClick={e=>e.stopPropagation()} onSubmit={e => { e.preventDefault(); saveTunnel(); }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: '#fff' }}>{editId ? 'Edit Tunnel' : 'New Tunnel'}</span>
-              <button disabled={isAdding} onClick={() => setNewOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)' }}><Icon d={Icons.x} size={16} color="currentColor" /></button>
+              <button type="button" disabled={isAdding} onClick={() => setNewOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)' }}><Icon d={Icons.x} size={16} color="currentColor" /></button>
             </div>
             
             <div style={{ marginBottom: 14 }}>
@@ -189,34 +271,37 @@ function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomai
             
             <div style={{ marginBottom: 14 }}>
               <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Local Address</label>
-              <input value={form.localAddr} onChange={e => setForm(x => ({...x, localAddr: e.target.value}))} placeholder="localhost:3000" disabled={isAdding}
+              <input ref={localAddrRef} value={form.localAddr} onChange={e => { const value = e.target.value; setForm(x => ({...x, localAddr: value})); setFormErrors(x => ({ ...x, localAddr: undefined })); }} placeholder="localhost:3000" disabled={isAdding}
                 style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }} />
+              {formErrors.localAddr && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)' }}>{formErrors.localAddr}</div>}
             </div>
             
             {(form.proto === 'http' || form.proto === 'https') ? (
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Domain (Optional)</label>
                 <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border2)', background: 'var(--panel2)' }}>
-                  <input value={form.domain} onChange={e => setForm(x => ({...x, domain: e.target.value}))} placeholder={baseDomain ? 'myapp' : 'myapp.tunnel.dev'} disabled={isAdding}
+                  <input value={form.domain} onChange={e => { const value = e.target.value; setForm(x => ({...x, domain: value})); setFormErrors(x => ({ ...x, domain: undefined })); }} placeholder={baseDomain ? 'myapp' : 'myapp.tunnel.dev'} disabled={isAdding}
                     style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }} />
                   {baseDomain && !form.domain.includes('.') && (
                     <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--text-dim)', padding: '8px 10px 8px 0', whiteSpace: 'nowrap' }}>.{baseDomain}</span>
                   )}
                 </div>
+                {formErrors.domain && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)' }}>{formErrors.domain}</div>}
               </div>
             ) : (
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Remote Port (Optional)</label>
-                <input type="number" value={form.port} onChange={e => setForm(x => ({...x, port: e.target.value}))} placeholder="0 for auto assign" disabled={isAdding}
+                <input type="number" value={form.port} onChange={e => { const value = e.target.value; setForm(x => ({...x, port: value})); setFormErrors(x => ({ ...x, port: undefined })); }} placeholder="0 for auto assign" disabled={isAdding}
                   style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }} />
+                {formErrors.port && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)' }}>{formErrors.port}</div>}
               </div>
             )}
             
-            <button onClick={saveTunnel} disabled={isAdding}
+            <button type="submit" disabled={isAdding}
               style={{ width: '100%', background: isAdding ? 'var(--accent-mid)' : 'var(--accent)', border: 'none', color: '#000', padding: '10px', fontSize: 13, fontWeight: 600, cursor: 'pointer', letterSpacing: '.03em', marginTop: 10 }}>
               {isAdding ? 'Saving...' : (editId ? 'Save Tunnel' : 'Start Tunnel')}
             </button>
-          </div>
+          </form>
         </div>
       )}
 
