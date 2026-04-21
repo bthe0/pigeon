@@ -114,9 +114,9 @@ function InspectorView({ tunnels }) {
               ].map(([title, headers]) => (
                 <div key={title} style={{ marginBottom: 20 }}>
                   <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 8 }}>{title}</div>
-                  <div style={{ background: 'var(--panel2)', border: '1px solid var(--border)', padding: '12px 14px', fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.7 }}>
+                  <div style={{ background: 'var(--panel2)', border: '1px solid var(--border)', padding: '12px 14px', fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.7, overflowX: 'hidden' }}>
                     {Object.keys(headers).length > 0 ? Object.entries(headers).map(([k,v]) => (
-                      <div key={k}><span style={{color:'var(--text-dim)'}}>{k}: </span><span style={{color:'var(--text)'}}>{v}</span></div>
+                      <div key={k} style={{ wordBreak: 'break-all', overflowWrap: 'anywhere' }}><span style={{color:'var(--text-dim)'}}>{k}: </span><span style={{color:'var(--text)'}}>{v}</span></div>
                     )) : (
                       <span style={{ color: 'var(--text-dim)' }}>No headers recorded.</span>
                     )}
