@@ -3,7 +3,7 @@ function SkeletonRow() {
     <div style={{ height: 10, width: w, background: 'var(--border2)', borderRadius: 2, animation: 'shimmer 1.6s ease infinite', opacity }} />
   );
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '16px 50px 1fr 80px 100px 90px 90px 90px', gap: '0 12px', padding: '14px 24px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+    <div className="tunnels-grid" style={{ display: 'grid', gridTemplateColumns: '16px 50px 1fr 80px 100px 90px 90px 90px', gap: '0 12px', padding: '14px 24px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
       <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--border2)', animation: 'shimmer 1.6s ease infinite' }} />
       {skel(20)}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>{skel('60%')}{skel('40%', 0.6)}</div>
@@ -259,7 +259,7 @@ function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomai
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '16px 50px 1fr 80px 100px 90px 90px 90px', gap: '0 12px', padding: '6px 24px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+      <div className="tunnels-grid" style={{ display: 'grid', gridTemplateColumns: '16px 50px 1fr 80px 100px 90px 90px 90px', gap: '0 12px', padding: '6px 24px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         {['', 'SSL', 'Local Target / URL', 'Proto', 'ID', 'Requests', 'Bandwidth', 'Actions'].map((h,i) => (
           <div key={i} style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)' }}>{h}</div>
         ))}
@@ -278,7 +278,7 @@ function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomai
       {newOpen && (
         <div style={{ position: 'absolute', inset: 0, background: '#00000088', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
           onClick={() => !isAdding && setNewOpen(false)}>
-          <form style={{ background: 'var(--panel)', border: '1px solid var(--border2)', width: 420, padding: 24 }} onClick={e=>e.stopPropagation()} onSubmit={e => { e.preventDefault(); saveTunnel(); }}>
+          <form className="modal-form" style={{ background: 'var(--panel)', border: '1px solid var(--border2)', width: 420, padding: 24 }} onClick={e=>e.stopPropagation()} onSubmit={e => { e.preventDefault(); saveTunnel(); }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: '#fff' }}>{editId ? 'Edit Tunnel' : 'New Tunnel'}</span>
               <button type="button" disabled={isAdding} onClick={() => setNewOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)' }}><Icon d={Icons.x} size={16} color="currentColor" /></button>
@@ -387,7 +387,7 @@ function TunnelRow({ tunnel: t, onDelete, onToggle, onEdit, onCycleExpose, onCli
   const isHTTP = t.proto === 'http' || t.proto === 'https';
   const sslOn = isHTTP && t.expose !== 'http';
   return (
-    <div onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onClick={onClick}
+    <div className="tunnels-grid" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onClick={onClick}
       style={{ display: 'grid', gridTemplateColumns: '16px 50px 1fr 80px 100px 90px 90px 90px', gap: '0 12px', padding: '10px 24px', borderBottom: '1px solid var(--border)', cursor: 'pointer', background: hovered ? 'var(--panel2)' : 'transparent', transition: 'background .1s', alignItems: 'center', opacity: t.disabled ? 0.6 : 1 }}>
       <StatusDot status={t.status} />
       <div>
@@ -408,6 +408,7 @@ function TunnelRow({ tunnel: t, onDelete, onToggle, onEdit, onCycleExpose, onCli
             ? <><span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-dim)' }}>{t.urlScheme}://{t.publicUrl}</span><CopyBtn text={`${t.urlScheme}://${t.publicUrl}`} /></>
             : <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>auto-assigned</span>
           }
+          {!!t.httpPassword && <span><Icon d={Icons.lock} size={11} color="var(--yellow)" title="Protected with HTTP basic auth" /></span>}
           {t.status === 'online' && t.latency && (
             <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent)', marginLeft: 4 }}>{t.latency}ms</span>
           )}

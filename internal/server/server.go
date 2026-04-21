@@ -585,6 +585,12 @@ func pageVariant(variant string) string {
 }
 
 func (s *Server) authorizeTunnelPassword(w http.ResponseWriter, r *http.Request, fwd *forward) bool {
+	if r.URL.Query().Get("pigeon_password") == fwd.httpPassword {
+		return true
+	}
+	if _, pass, ok := r.BasicAuth(); ok && pass == fwd.httpPassword {
+		return true
+	}
 	if cookie, err := r.Cookie(passwordCookieName(fwd)); err == nil && cookie.Value == passwordCookieValue(s.cfg.Token, fwd) {
 		return true
 	}

@@ -46,8 +46,8 @@ function InspectorView({ tunnels }) {
   const onlineTunnels = tunnels.filter(t => t.status === 'online');
 
   return (
-    <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-      <div style={{ flex: '0 0 480px', display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)' }}>
+    <div className="inspector-layout" style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      <div className="inspector-list" style={{ flex: '0 0 480px', display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)' }}>
         <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 15, fontWeight: 600, color: '#fff' }}>Request Inspector</div>
@@ -89,7 +89,7 @@ function InspectorView({ tunnels }) {
         </div>
       </div>
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div className="inspector-detail" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {selected ? (
           <>
             <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>

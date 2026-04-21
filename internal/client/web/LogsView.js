@@ -72,7 +72,7 @@ function LogsView() {
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+      <div className="logs-toolbar" style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 15, fontWeight: 600, color: '#fff' }}>System Logs</div>
           <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 1 }}>{filtered.length} entries</div>

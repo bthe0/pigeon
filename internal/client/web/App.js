@@ -128,7 +128,7 @@ function TunnelDetail({ tunnel, onClose }) {
   }
 
   return (
-    <div style={{ position:'absolute', right:0, top:0, bottom:0, width: tab==='visitors' ? 520 : 360, background:'var(--panel)', borderLeft:'1px solid var(--border2)', display:'flex', flexDirection:'column', zIndex:50, animation:'slideIn .18s ease', transition:'width .2s ease' }}>
+    <div className="tunnel-detail-panel" style={{ position:'absolute', right:0, top:0, bottom:0, width: tab==='visitors' ? 520 : 360, background:'var(--panel)', borderLeft:'1px solid var(--border2)', display:'flex', flexDirection:'column', zIndex:50, animation:'slideIn .18s ease', transition:'width .2s ease' }}>
       <div style={{ padding:'14px 20px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:10, flexShrink:0 }}>
         <StatusDot status={tunnel.status} />
         <span style={{ flex:1, fontSize:14, fontWeight:600, color:'#fff' }}>Local Target: {tunnel.localPort}</span>
@@ -226,7 +226,7 @@ function StatsBar({ tunnels, server, version }) {
   const online = tunnels.length;
   const totalReqs = tunnels.reduce((a, t) => a + t.requests, 0);
   return (
-    <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', flexShrink: 0, background: 'var(--panel)' }}>
+    <div className="stats-bar" style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', flexShrink: 0, background: 'var(--panel)' }}>
       {[
         { label: 'Active Tunnels', value: `${online} connected`, accent: true },
         { label: 'Total Mocks', value: totalReqs.toLocaleString() },
@@ -353,9 +353,9 @@ function App() {
   }
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+    <div className="app-layout" style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
       <StatsBar tunnels={tunnels} server={rawConfig?.server} version={rawConfig?.version} />
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
+      <div className="app-layout" style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
         <Sidebar active={activeNav} setActive={v => { window.location.hash = v; setSelectedTunnel(null); }} />
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
           {activeNav === 'tunnels' && <TunnelsView tunnels={tunnels} loading={loading} reloadConfig={loadConfig} onSelectTunnel={t => setSelectedTunnel(t)} baseDomain={rawConfig?.base_domain || ''} />}
