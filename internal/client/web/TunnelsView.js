@@ -4,7 +4,7 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
   const [form, setForm] = useState({ localAddr: '', domain: '', port: '', proto: 'http', disabled: false });
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteId, setDeleteId] = useState(null);
   const [isAdding, setIsAdding] = useState(false);
 
   const filtered = tunnels.filter(t => {
@@ -13,17 +13,16 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
     return matchStatus && matchSearch;
   });
 
-  async function deleteTunnel(id) {
-    if(!confirm("Are you sure you want to delete this forward?")) return;
-    setIsDeleting(true);
+  async function confirmDelete() {
+    if (!deleteId) return;
     try {
-      const res = await fetch(`/api/forwards/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/forwards/${deleteId}`, { method: 'DELETE' });
       if(!res.ok) throw new Error(await res.text());
       await reloadConfig();
     } catch(err) {
       alert("Error deleting: " + err.message);
     }
-    setIsDeleting(false);
+    setDeleteId(null);
   }
 
   async function saveTunnel() {
@@ -116,7 +115,7 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {filtered.map(t => (
-          <TunnelRow key={t.id} tunnel={t} onDelete={deleteTunnel} onToggle={toggleTunnel} onEdit={openEdit} onClick={() => onSelectTunnel(t)} isDeleting={isDeleting} />
+          <TunnelRow key={t.id} tunnel={t} onDelete={setDeleteId} onToggle={toggleTunnel} onEdit={openEdit} onClick={() => onSelectTunnel(t)} />
         ))}
         {filtered.length === 0 && (
           <div style={{ padding: '40px 24px', textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>No tunnels found</div>
@@ -169,11 +168,31 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
           </div>
         </div>
       )}
+
+      {deleteId && (
+        <div style={{ position: 'absolute', inset: 0, background: '#00000088', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
+          onClick={() => setDeleteId(null)}>
+          <div style={{ background: 'var(--panel)', border: '1px solid var(--border2)', width: 360, padding: 24 }} onClick={e=>e.stopPropagation()}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: '#fff', marginBottom: 10 }}>Delete Forward</div>
+            <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 20 }}>Are you sure you want to delete this forward? This action cannot be undone.</div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setDeleteId(null)}
+                style={{ flex: 1, background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
+                Cancel
+              </button>
+              <button onClick={confirmDelete}
+                style={{ flex: 1, background: '#ff4d4d', border: 'none', color: '#000', padding: '8px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function TunnelRow({ tunnel: t, onDelete, onToggle, onEdit, onClick, isDeleting }) {
+function TunnelRow({ tunnel: t, onDelete, onToggle, onEdit, onClick }) {
   const [hovered, setHovered] = useState(false);
   return (
     <div onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onClick={onClick}
@@ -194,17 +213,17 @@ function TunnelRow({ tunnel: t, onDelete, onToggle, onEdit, onClick, isDeleting 
       <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-mid)' }}>{t.requests.toLocaleString()}</div>
       <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-mid)' }}>{t.bandwidth}</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <button onClick={e=>{e.stopPropagation();onToggle(t);}} disabled={isDeleting}
+        <button onClick={e=>{e.stopPropagation();onToggle(t);}}
           style={{ background: 'none', border: '1px solid var(--border2)', padding: '4px 6px', cursor: 'pointer', color: t.disabled ? 'var(--text-dim)' : 'var(--accent)', display: 'flex', alignItems: 'center', title: t.disabled ? 'Enable' : 'Disable' }}>
           <Icon d={t.disabled ? Icons.toggleOff : Icons.toggleOn} size={13} color="currentColor" />
         </button>
-        <button onClick={e=>{e.stopPropagation();onEdit(t);}} disabled={isDeleting}
+        <button onClick={e=>{e.stopPropagation();onEdit(t);}}
           style={{ background: 'none', border: '1px solid var(--border2)', padding: '4px 6px', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', alignItems: 'center', title: 'Edit' }}>
           <Icon d={Icons.edit} size={11} color="currentColor" />
         </button>
-        <button onClick={e=>{e.stopPropagation();onDelete(t.id);}} disabled={isDeleting}
-          style={{ background: 'none', border: '1px solid var(--border2)', padding: '4px 6px', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', alignItems: 'center', title: 'Delete' }}>
-          <Icon d={Icons.trash} size={11} color="currentColor" />
+        <button onClick={e=>{e.stopPropagation();onDelete(t.id);}}
+          style={{ background: 'none', border: '1px solid var(--border2)', padding: '4px 6px', cursor: 'pointer', color: '#ff4d4d88', display: 'flex', alignItems: 'center', title: 'Delete' }}>
+          <Icon d={Icons.trash} size={11} color="#ff4d4d" />
         </button>
       </div>
     </div>

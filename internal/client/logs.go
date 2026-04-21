@@ -159,24 +159,40 @@ func FetchRecentLogs(filter string, limit int) ([]LogEntry, error) {
 	}
 	latest := latestNDJSON(logDir)
 	var entries []LogEntry
-	if latest == "" {
-		return entries, nil
-	}
-	f, err := os.Open(latest)
-	if err != nil {
-		return entries, err
-	}
-	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" { continue }
-		var e LogEntry
-		if err := json.Unmarshal([]byte(line), &e); err == nil {
-			if filter == "" || e.ForwardID == filter {
-				entries = append(entries, e)
+	// Read daemon.log
+	daemonLog := filepath.Join(logDir, "daemon.log")
+	if f, err := os.Open(daemonLog); err == nil {
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line != "" {
+				entries = append(entries, LogEntry{
+					Time:      time.Now().Format(time.RFC3339),
+					Protocol:  "DAEMON",
+					ForwardID: "system",
+					Action:    line,
+				})
 			}
+		}
+		f.Close()
+	}
+
+	if latest != "" {
+		f, err := os.Open(latest)
+		if err == nil {
+			scanner := bufio.NewScanner(f)
+			for scanner.Scan() {
+				line := scanner.Text()
+				if line == "" { continue }
+				var e LogEntry
+				if err := json.Unmarshal([]byte(line), &e); err == nil {
+					if filter == "" || e.ForwardID == filter {
+						entries = append(entries, e)
+					}
+				}
+			}
+			f.Close()
 		}
 	}
 	if limit > 0 && len(entries) > limit {
