@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -38,6 +40,7 @@ func main() {
 		serverCmd(),
 		devCmd(),
 		initCmd(),
+		setupCmd(),
 		daemonCmd(),
 		forwardCmd(),
 		logsCmd(),
@@ -463,6 +466,111 @@ Example:
 	return cmd
 }
 
+// ── pigeon setup ───────────────────────────────────────────────────────────────
+
+func setupCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "setup",
+		Short: "Interactive setup wizard for Pigeon client/server",
+		Run: func(cmd *cobra.Command, args []string) {
+			reader := bufio.NewReader(os.Stdin)
+			fmt.Println("🐦 Welcome to Pigeon Setup 🐦")
+			fmt.Println()
+			fmt.Println("Are you setting up a:")
+			fmt.Println("  [1] Server (VPS/Relay)")
+			fmt.Println("  [2] Client (Local Machine)")
+			fmt.Print("\nEnter 1 or 2: ")
+			
+			ans, _ := reader.ReadString('\n')
+			ans = strings.TrimSpace(ans)
+
+			if ans == "1" {
+				fmt.Println("\n=== Pigeon Server Setup ===")
+				fmt.Print("Enter your base domain (e.g. tun.example.com): ")
+				domain, _ := reader.ReadString('\n')
+				domain = strings.TrimSpace(domain)
+
+				fmt.Print("Enter a strong secret token (or press enter to auto-generate): ")
+				token, _ := reader.ReadString('\n')
+				token = strings.TrimSpace(token)
+				if token == "" {
+					token = randomID(16)
+					fmt.Println("Generated token:", token)
+				}
+
+				fmt.Println("\n✅ Steps to complete Server Setup:")
+				fmt.Println()
+				fmt.Println("1. Configure DNS records for your domain (in your registrar or Cloudflare):")
+				fmt.Printf("   A   %s   <YOUR_SERVER_IP>\n", domain)
+				fmt.Printf("   A   *.%s <YOUR_SERVER_IP>\n", domain)
+				
+				fmt.Println("\n2. Nginx Reverse Proxy (Optional, if Pigeon shares port 80/443 with other apps):")
+				fmt.Printf(`   server {
+       listen 80;
+       server_name %s *.%s;
+       location / {
+           proxy_pass http://127.0.0.1:8080;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           
+           # For WebSockets and Streams
+           proxy_http_version 1.1;
+           proxy_set_header Upgrade $http_upgrade;
+           proxy_set_header Connection "upgrade";
+       }
+   }`+"\n", domain, domain)
+				fmt.Println("\n3. Create a Systemd service to keep pigeon running forever:")
+				fmt.Printf(`   sudo tee /etc/systemd/system/pigeon-server.service <<EOF
+[Unit]
+Description=Pigeon Tunnel Server
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/pigeon server --domain %s --token %s --http :8080 --control :2222
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF`+"\n", domain, token)
+				fmt.Println("\n   Then run:")
+				fmt.Println("   sudo systemctl daemon-reload")
+				fmt.Println("   sudo systemctl enable --now pigeon-server")
+
+			} else if ans == "2" {
+				fmt.Println("\n=== Pigeon Client Setup ===")
+				fmt.Print("Enter your Pigeon Server Address (e.g. tun.example.com:2222): ")
+				serverAddr, _ := reader.ReadString('\n')
+				serverAddr = strings.TrimSpace(serverAddr)
+
+				fmt.Print("Enter your Pigeon Auth Token: ")
+				token, _ := reader.ReadString('\n')
+				token = strings.TrimSpace(token)
+
+				cfg := &client.Config{Server: serverAddr, Token: token}
+				if err := client.SaveConfig(cfg); err != nil {
+					fmt.Printf("Error saving config: %v\n", err)
+				} else {
+					fmt.Println("\n✅ Client initialized successfully!")
+				}
+
+				fmt.Println("\nNext Steps:")
+				fmt.Println("1. Add a forward rule (e.g. forward local port 3000):")
+				fmt.Println("   pigeon forward add http localhost:3000")
+				fmt.Println("\n2. Start the pigeon background daemon:")
+				fmt.Println("   pigeon daemon start")
+				fmt.Println("\n3. Open the Web UI to manage your tunnels visually!")
+				fmt.Println("   pigeon web")
+
+			} else {
+				fmt.Println("Invalid option chosen. Exiting.")
+			}
+		},
+	}
+	return cmd
+}
+
 // ── helpers ────────────────────────────────────────────────────────────────────
 
 const idChars = "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -471,7 +579,7 @@ func randomID(n int) string {
 	b := make([]byte, n)
 	for i := range b {
 		b[i] = idChars[time.Now().UnixNano()%int64(len(idChars))]
-		time.Sleep(1)
+		time.Sleep(time.Nanosecond)
 	}
 	return string(b)
 }
