@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/bthe0/pigeon/internal/proto"
 )
@@ -79,10 +80,15 @@ func LoadConfig() (*Config, error) {
 	}
 	defer f.Close()
 	var cfg Config
-	return &cfg, json.NewDecoder(f).Decode(&cfg)
+	if err := json.NewDecoder(f).Decode(&cfg); err != nil {
+		return nil, err
+	}
+	cfg.normalizeForwards()
+	return &cfg, nil
 }
 
 func SaveConfig(cfg *Config) error {
+	cfg.normalizeForwards()
 	path, err := ConfigPath()
 	if err != nil {
 		return err
@@ -98,6 +104,7 @@ func SaveConfig(cfg *Config) error {
 }
 
 func (cfg *Config) AddForward(r ForwardRule) error {
+	cfg.normalizeForward(&r)
 	for _, f := range cfg.Forwards {
 		if f.ID == r.ID || (f.Protocol == r.Protocol && f.LocalAddr == r.LocalAddr && f.Domain == r.Domain && f.RemotePort == r.RemotePort) {
 			return fmt.Errorf("duplicate forward")
@@ -127,6 +134,7 @@ func (cfg *Config) SetPublicAddr(id, publicAddr string) {
 }
 
 func (cfg *Config) UpdateForward(id string, rule ForwardRule) error {
+	cfg.normalizeForward(&rule)
 	for i, f := range cfg.Forwards {
 		if f.ID == id {
 			cfg.Forwards[i] = rule
@@ -134,4 +142,25 @@ func (cfg *Config) UpdateForward(id string, rule ForwardRule) error {
 		}
 	}
 	return fmt.Errorf("forward not found")
+}
+
+func (cfg *Config) normalizeForwards() {
+	for i := range cfg.Forwards {
+		cfg.normalizeForward(&cfg.Forwards[i])
+	}
+}
+
+func (cfg *Config) normalizeForward(rule *ForwardRule) {
+	if cfg.BaseDomain == "" {
+		return
+	}
+	if rule.Protocol != proto.ProtoHTTP && rule.Protocol != proto.ProtoHTTPS {
+		return
+	}
+	if rule.Domain != "" && !strings.Contains(rule.Domain, ".") {
+		rule.Domain = rule.Domain + "." + cfg.BaseDomain
+	}
+	if rule.PublicAddr != "" && !strings.Contains(rule.PublicAddr, ".") {
+		rule.PublicAddr = rule.PublicAddr + "." + cfg.BaseDomain
+	}
 }

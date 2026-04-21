@@ -1,4 +1,18 @@
-function TunnelsView({ tunnels, reloadConfig, onSelectTunnel, baseDomain }) {
+function SkeletonRow() {
+  const skel = (w, opacity = 1) => (
+    <div style={{ height: 10, width: w, background: 'var(--border2)', borderRadius: 2, animation: 'shimmer 1.6s ease infinite', opacity }} />
+  );
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '16px 50px 1fr 80px 100px 90px 90px 90px', gap: '0 12px', padding: '14px 24px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+      <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--border2)', animation: 'shimmer 1.6s ease infinite' }} />
+      {skel(20)}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>{skel('60%')}{skel('40%', 0.6)}</div>
+      {skel(36)}{skel(64)}{skel(28)}{skel(28)}{skel(56)}
+    </div>
+  );
+}
+
+function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomain }) {
   const [newOpen, setNewOpen] = useState(false);
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState({ localAddr: '', domain: '', port: '', proto: 'http', disabled: false, expose: 'both' });
@@ -144,12 +158,13 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel, baseDomain }) {
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
-        {filtered.map(t => (
+        {loading ? (
+          [1,2,3].map(i => <SkeletonRow key={i} />)
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: '40px 24px', textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>No tunnels found</div>
+        ) : filtered.map(t => (
           <TunnelRow key={t.id} tunnel={t} onDelete={setDeleteId} onToggle={toggleTunnel} onEdit={openEdit} onCycleExpose={cycleExpose} onClick={() => onSelectTunnel(t)} />
         ))}
-        {filtered.length === 0 && (
-          <div style={{ padding: '40px 24px', textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>No tunnels found</div>
-        )}
       </div>
 
       {newOpen && (

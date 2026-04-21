@@ -91,6 +91,26 @@ func TestAddForward_MultipleDistinct(t *testing.T) {
 	}
 }
 
+func TestAddForward_NormalizesShortHTTPDomainWithBaseDomain(t *testing.T) {
+	cfg := &client.Config{BaseDomain: "pigeon.local"}
+	rule := client.ForwardRule{
+		ID:         "abc",
+		Protocol:   proto.ProtoHTTP,
+		LocalAddr:  "localhost:3000",
+		Domain:     "asd",
+		PublicAddr: "asd",
+	}
+	if err := cfg.AddForward(rule); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := cfg.Forwards[0].Domain; got != "asd.pigeon.local" {
+		t.Fatalf("Domain: got %q want %q", got, "asd.pigeon.local")
+	}
+	if got := cfg.Forwards[0].PublicAddr; got != "asd.pigeon.local" {
+		t.Fatalf("PublicAddr: got %q want %q", got, "asd.pigeon.local")
+	}
+}
+
 // ── Config.RemoveForward ───────────────────────────────────────────────────────
 
 func TestRemoveForward_ByID(t *testing.T) {
@@ -196,6 +216,35 @@ func TestSaveLoadConfig_RoundTrip(t *testing.T) {
 	}
 	if loaded.Forwards[1].RemotePort != 5432 {
 		t.Errorf("Forwards[1].RemotePort: got %d want 5432", loaded.Forwards[1].RemotePort)
+	}
+}
+
+func TestLoadConfig_NormalizesShortHTTPDomainsWithBaseDomain(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	cfg := &client.Config{
+		Server:     "127.0.0.1:2222",
+		Token:      "secret-token",
+		BaseDomain: "pigeon.local",
+		Forwards: []client.ForwardRule{
+			{ID: "f1", Protocol: proto.ProtoHTTP, LocalAddr: "localhost:3000", Domain: "asd", PublicAddr: "asd"},
+		},
+	}
+
+	if err := client.SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	loaded, err := client.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got := loaded.Forwards[0].Domain; got != "asd.pigeon.local" {
+		t.Fatalf("Domain: got %q want %q", got, "asd.pigeon.local")
+	}
+	if got := loaded.Forwards[0].PublicAddr; got != "asd.pigeon.local" {
+		t.Fatalf("PublicAddr: got %q want %q", got, "asd.pigeon.local")
 	}
 }
 

@@ -2,25 +2,7 @@ function LogsView() {
   const [logs, setLogs] = useState([]);
   const [live, setLive] = useState(true);
   const [levelFilter, setLevelFilter] = useState('ALL');
-  const scrollRef = useRef(null);
-  const userScrolled = useRef(false);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const onScroll = () => {
-      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-      userScrolled.current = !atBottom;
-    };
-    el.addEventListener('scroll', onScroll);
-    return () => el.removeEventListener('scroll', onScroll);
-  }, []);
-
-  useEffect(() => {
-    if (userScrolled.current) return;
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [logs]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!live) return;
@@ -36,17 +18,27 @@ function LogsView() {
              let level = 'INFO';
              let msg = r.action;
              if (r.protocol === 'DAEMON') {
-               if (msg.includes('error') || msg.includes('fail')) level = 'ERROR';
+               const m = msg.toLowerCase();
+               if (m.includes('error') || m.includes('fail') || m.includes('dial local') ||
+                   m.includes('server error') || m.includes('client init') ||
+                   m.includes('save config') || m.includes('udp session') || m.includes('udp write')) {
+                 level = 'ERROR';
+               } else if (m.includes('disconnect') || m.includes('reconnect') ||
+                          m.includes('unknown forward') || m.includes('retry') || m.includes('attempt')) {
+                 level = 'WARN';
+               }
              } else {
-               msg = `${r.protocol} traffic from ${r.remote_addr} [${r.forward_id}] — ${r.action}`;
-               if (r.bytes) msg += ` (${r.bytes} bytes)`;
+               msg = `[${r.forward_id}] ${r.protocol} ${r.action}`;
+               if (r.remote_addr) msg += ` from ${r.remote_addr}`;
+               if (r.bytes) msg += ` — ${r.bytes} bytes`;
              }
 
              return { t, level, msg };
           });
-          setLogs(formatted);
+          setLogs([...formatted].reverse());
+          setLoading(false);
         }
-      } catch (err) {}
+      } catch (err) { setLoading(false); }
     }, 1000);
     return () => clearInterval(iv);
   }, [live]);
@@ -76,15 +68,38 @@ function LogsView() {
         </button>
         <button onClick={() => setLogs([])} style={{ background: 'none', border: '1px solid var(--border2)', padding: '5px 10px', color: 'var(--text-dim)', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--sans)' }}>Clear</button>
       </div>
-      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '8px 24px', fontFamily: 'var(--mono)', fontSize: 11.5, lineHeight: 1.8 }}>
-        {filtered.map((l, i) => (
-          <div key={i} style={{ display: 'flex', gap: 14, padding: '2px 0', borderBottom: '1px solid var(--border)10' }}>
-            <span style={{ color: 'var(--text-dim)', flexShrink: 0, userSelect: 'none' }}>{l.t}</span>
-            <span style={{ flexShrink: 0, fontWeight: 600, width: 40, color: LEVEL_COLORS[l.level] || 'var(--text-mid)' }}>{l.level}</span>
-            <span style={{ color: l.level==='ERROR' ? 'var(--red)' : l.level==='WARN' ? 'var(--yellow)' : 'var(--text)' }}>{l.msg}</span>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 24px', fontFamily: 'var(--mono)', fontSize: 11.5, lineHeight: 1.8 }}>
+        {loading ? (
+          <div style={{ paddingTop: 16 }}>
+            {[
+              { time: 52, level: 32, msg: '68%' },
+              { time: 52, level: 32, msg: '42%' },
+              { time: 52, level: 32, msg: '81%' },
+              { time: 52, level: 32, msg: '35%' },
+              { time: 52, level: 32, msg: '57%' },
+              { time: 52, level: 32, msg: '73%' },
+              { time: 52, level: 32, msg: '29%' },
+              { time: 52, level: 32, msg: '61%' },
+            ].map((row, i) => (
+              <div key={i} style={{ display: 'flex', gap: 14, padding: '6px 0', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+                <div style={{ height: 7, width: row.time, background: 'var(--border2)', borderRadius: 2, flexShrink: 0, animation: `shimmer 1.8s ease ${i * 0.1}s infinite` }} />
+                <div style={{ height: 7, width: row.level, background: 'var(--border2)', borderRadius: 2, flexShrink: 0, animation: `shimmer 1.8s ease ${i * 0.1 + 0.05}s infinite` }} />
+                <div style={{ height: 7, width: row.msg, background: 'var(--border2)', borderRadius: 2, animation: `shimmer 1.8s ease ${i * 0.1 + 0.1}s infinite` }} />
+              </div>
+            ))}
           </div>
-        ))}
-        {filtered.length === 0 && <div style={{ color: 'var(--text-dim)', textAlign: 'center', marginTop: 40, fontFamily: 'var(--sans)' }}>No traffic logged yet.</div>}
+        ) : (
+          <>
+            {filtered.map((l, i) => (
+              <div key={i} style={{ display: 'flex', gap: 14, padding: '2px 0', borderBottom: '1px solid var(--border)10' }}>
+                <span style={{ color: 'var(--text-dim)', flexShrink: 0, userSelect: 'none' }}>{l.t}</span>
+                <span style={{ flexShrink: 0, fontWeight: 600, width: 40, color: LEVEL_COLORS[l.level] || 'var(--text-mid)' }}>{l.level}</span>
+                <span style={{ color: l.level==='ERROR' ? 'var(--red)' : l.level==='WARN' ? 'var(--yellow)' : 'var(--text)' }}>{l.msg}</span>
+              </div>
+            ))}
+            {filtered.length === 0 && <div style={{ color: 'var(--text-dim)', textAlign: 'center', marginTop: 40, fontFamily: 'var(--sans)' }}>No traffic logged yet.</div>}
+          </>
+        )}
       </div>
     </div>
   );

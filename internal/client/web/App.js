@@ -46,13 +46,26 @@ function StatsBar({ tunnels, server, version }) {
   );
 }
 
+const NAV_PAGES = ['tunnels', 'logs', 'settings'];
+function hashNav() {
+  const h = window.location.hash.replace('#', '');
+  return NAV_PAGES.includes(h) ? h : 'tunnels';
+}
+
 function App() {
-  const [activeNav, setActiveNav] = useState('tunnels');
+  const [activeNav, setActiveNav] = useState(hashNav);
   const [tunnels, setTunnels] = useState([]);
   const [rawConfig, setRawConfig] = useState(null);
   const [selectedTunnel, setSelectedTunnel] = useState(null);
   const [initError, setInitError] = useState(null);
-  
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const onHash = () => setActiveNav(hashNav());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
   const loadConfig = async () => {
     try {
       const res = await fetch('/api/config');
@@ -102,9 +115,11 @@ function App() {
         };
       });
       setTunnels(parsedTunnels);
-      
+
     } catch(err) {
       console.error("Config fetch error", err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -129,11 +144,11 @@ function App() {
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
       <StatsBar tunnels={tunnels} server={rawConfig?.server} version={rawConfig?.version} />
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
-        <Sidebar active={activeNav} setActive={v => { setActiveNav(v); setSelectedTunnel(null); }} />
+        <Sidebar active={activeNav} setActive={v => { window.location.hash = v; setSelectedTunnel(null); }} />
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
-          {activeNav === 'tunnels' && <TunnelsView tunnels={tunnels} reloadConfig={loadConfig} onSelectTunnel={t => setSelectedTunnel(t)} baseDomain={rawConfig?.base_domain || ''} />}
+          {activeNav === 'tunnels' && <TunnelsView tunnels={tunnels} loading={loading} reloadConfig={loadConfig} onSelectTunnel={t => setSelectedTunnel(t)} baseDomain={rawConfig?.base_domain || ''} />}
           {activeNav === 'logs' && <LogsView />}
-          {activeNav === 'settings' && <SettingsView config={rawConfig} />}
+          {activeNav === 'settings' && <SettingsView config={rawConfig} loading={loading} />}
           {selectedTunnel && activeNav === 'tunnels' && <TunnelDetail tunnel={selectedTunnel} onClose={() => setSelectedTunnel(null)} />}
         </div>
       </div>
