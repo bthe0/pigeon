@@ -50,6 +50,14 @@ go build -o pigeon ./cmd/pigeon
 
 ## Quick Start
 
+The absolute fastest way to initialize your server and client is using the interactive setup tool:
+
+```bash
+pigeon setup
+```
+
+Otherwise, here is the manual guide:
+
 ### 1 — Run the server (on your VPS)
 
 ```bash
@@ -112,6 +120,12 @@ The daemon connects to the server, registers all configured forwards, and automa
 ---
 
 ## Commands
+
+### `pigeon setup` — Interactive automated setup
+```bash
+pigeon setup
+```
+Provides an interactive setup wizard that configures Nginx routes, automatically installs and enables Systemd services for your relay server, and verifies connection stability during local client compilation.
 
 ### `pigeon server` — Run the tunnel server
 
