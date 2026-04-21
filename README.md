@@ -1,6 +1,13 @@
 # 🐦 Pigeon
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/bthe0/pigeon)](https://goreportcard.com/report/github.com/bthe0/pigeon)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/bthe0/pigeon)](https://github.com/bthe0/pigeon)
+[![Awesome](https://awesome.re/badge.svg)](https://awesome.re)
+
 A lightweight, self-hosted tunnelling tool that exposes local services to the internet over **HTTP**, **TCP**, and **UDP** — no third-party services required.
+
+![Pigeon Web Dashboard](assets/dashboard.png)
 
 ```
                   ┌─────────────┐        ┌─────────────┐
