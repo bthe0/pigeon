@@ -9,9 +9,7 @@ function Sidebar({ active, setActive }) {
       {/* Logo */}
       <div style={{ padding: '20px 16px 16px', borderBottom: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ width: 24, height: 24, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Icon d={Icons.zap} size={14} color="#000" />
-          </div>
+          <img src="/logo.png" alt="Pigeon logo" style={{ width: 28, height: 28, objectFit: 'contain', flexShrink: 0 }} />
           <span style={{ fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 14, letterSpacing: '.06em', color: '#fff' }}>pigeon</span>
         </div>
         <div style={{ marginTop: 4, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>tunnel agent connected</div>

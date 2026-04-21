@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tunnelr — Control Panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0b0d0c;
+    --panel: #111412;
+    --panel2: #161917;
+    --border: #222522;
+    --border2: #2a2e2b;
+    --accent: #00e87a;
+    --accent-dim: #00e87a22;
+    --accent-mid: #00e87a55;
+    --red: #ff4d4d;
+    --yellow: #f5c542;
+    --blue: #4d9fff;
+    --text: #d8ddd9;
+    --text-dim: #6b7068;
+    --text-mid: #9ba39c;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+    --accent-tweak: #00e87a;
+  }
+  html, body, #root { height: 100%; width: 100%; overflow: hidden; background: var(--bg); }
+  body { font-family: var(--sans); color: var(--text); }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  /* Tweaks panel */
+  #tweaks-panel {
+    display: none;
+    position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+    background: var(--panel2); border: 1px solid var(--border2);
+    width: 220px; padding: 16px; font-family: var(--sans); font-size: 12px;
+  }
+  #tweaks-panel.open { display: block; }
+  #tweaks-panel h4 { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-mid); margin-bottom: 12px; }
+  .tweak-row { margin-bottom: 10px; }
+  .tweak-row label { display: block; color: var(--text-dim); font-size: 11px; margin-bottom: 4px; }
+  .tweak-row input[type=color] { width: 100%; height: 28px; border: 1px solid var(--border2); background: var(--panel); cursor: pointer; }
+  .tweak-row select { width: 100%; padding: 5px 6px; background: var(--panel); border: 1px solid var(--border2); color: var(--text); font-size: 11px; font-family: var(--sans); }
+  .tweak-row input[type=range] { width: 100%; accent-color: var(--accent); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<div id="tweaks-panel">
+  <h4>Tweaks</h4>
+  <div class="tweak-row">
+    <label>Accent color</label>
+    <input type="color" id="tw-accent" value="#00e87a" oninput="applyTweak('accent', this.value)" />
+  </div>
+  <div class="tweak-row">
+    <label>Density</label>
+    <select id="tw-density" onchange="applyTweak('density', this.value)">
+      <option value="comfortable">Comfortable</option>
+      <option value="compact" selected>Compact</option>
+      <option value="dense">Dense</option>
+    </select>
+  </div>
+  <div class="tweak-row">
+    <label>Font size</label>
+    <input type="range" id="tw-size" min="11" max="15" value="13" step="1" oninput="applyTweak('fontSize', this.value)" />
+  </div>
+</div>
+
+<script>
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "accentColor": "#3dffdf",
+  "density": "compact",
+  "fontSize": 13
+}/*EDITMODE-END*/;
+
+function applyTweak(key, val) {
+  if (key === 'accent') {
+    document.documentElement.style.setProperty('--accent', val);
+    document.documentElement.style.setProperty('--accent-dim', val + '22');
+    document.documentElement.style.setProperty('--accent-mid', val + '55');
+    window.parent.postMessage({type:'__edit_mode_set_keys', edits:{accentColor: val}}, '*');
+  }
+  if (key === 'density') {
+    const map = {comfortable: '44px', compact: '36px', dense: '28px'};
+    document.documentElement.style.setProperty('--row-h', map[val] || '36px');
+    window.parent.postMessage({type:'__edit_mode_set_keys', edits:{density: val}}, '*');
+  }
+  if (key === 'fontSize') {
+    document.documentElement.style.setProperty('--ui-size', val + 'px');
+    window.parent.postMessage({type:'__edit_mode_set_keys', edits:{fontSize: Number(val)}}, '*');
+  }
+}
+
+// Apply saved tweaks
+applyTweak('accent', TWEAK_DEFAULTS.accentColor || '#00e87a');
+applyTweak('density', TWEAK_DEFAULTS.density || 'compact');
+applyTweak('fontSize', TWEAK_DEFAULTS.fontSize || 13);
+if (document.getElementById('tw-accent')) document.getElementById('tw-accent').value = TWEAK_DEFAULTS.accentColor || '#00e87a';
+if (document.getElementById('tw-density')) document.getElementById('tw-density').value = TWEAK_DEFAULTS.density || 'compact';
+if (document.getElementById('tw-size')) document.getElementById('tw-size').value = TWEAK_DEFAULTS.fontSize || 13;
+
+window.addEventListener('message', e => {
+  if (e.data?.type === '__activate_edit_mode') document.getElementById('tweaks-panel').classList.add('open');
+  if (e.data?.type === '__deactivate_edit_mode') document.getElementById('tweaks-panel').classList.remove('open');
+});
+window.parent.postMessage({type: '__edit_mode_available'}, '*');
+</script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ── Data ─────────────────────────────────────────────────────────────────────
+const INITIAL_TUNNELS = [
+  { id: 'tun_1', name: 'api-server', proto: 'https', localPort: 3000, publicUrl: 'api-x7f2.tunnelr.dev', status: 'online', region: 'us-east', requests: 1482, bandwidth: '4.2 MB', latency: 12, created: '2h ago', tags: ['prod'] },
+  { id: 'tun_2', name: 'webhook-handler', proto: 'https', localPort: 8080, publicUrl: 'wh-k9p1.tunnelr.dev', status: 'online', region: 'eu-west', requests: 309, bandwidth: '0.8 MB', latency: 28, created: '45m ago', tags: ['dev'] },
+  { id: 'tun_3', name: 'postgres-db', proto: 'tcp', localPort: 5432, publicUrl: 'tcp://0.tcp.tunnelr.dev:21934', status: 'online', region: 'us-east', requests: 0, bandwidth: '12.1 MB', latency: 8, created: '5h ago', tags: ['db'] },
+  { id: 'tun_4', name: 'frontend-dev', proto: 'https', localPort: 5173, publicUrl: 'fe-m3t8.tunnelr.dev', status: 'offline', region: 'ap-south', requests: 47, bandwidth: '0.2 MB', latency: null, created: '1d ago', tags: ['dev'] },
+];
+
+const STATUS_COLORS = { online: '#00e87a', offline: '#6b7068', error: '#ff4d4d' };
+const PROTO_COLORS = { https: '#4d9fff', tcp: '#f5c542', http: '#9b8fff' };
+
+const MOCK_REQUESTS = [
+  { id: 'r1', method: 'POST', path: '/api/webhook', status: 201, ms: 34, time: '14:22:01', tunnel: 'webhook-handler', ip: '104.21.44.1', size: '1.2 KB' },
+  { id: 'r2', method: 'GET',  path: '/api/users',   status: 200, ms: 11, time: '14:22:00', tunnel: 'api-server',      ip: '192.168.1.4', size: '8.4 KB' },
+  { id: 'r3', method: 'DELETE',path:'/api/items/9', status: 404, ms: 5,  time: '14:21:58', tunnel: 'api-server',      ip: '192.168.1.4', size: '0.2 KB' },
+  { id: 'r4', method: 'PUT',  path: '/api/config',  status: 200, ms: 22, time: '14:21:55', tunnel: 'api-server',      ip: '10.0.0.2',    size: '0.9 KB' },
+  { id: 'r5', method: 'POST', path: '/api/auth/login',status:200,ms: 88, time: '14:21:40', tunnel: 'api-server',      ip: '203.0.113.7', size: '2.1 KB' },
+  { id: 'r6', method: 'GET',  path: '/health',      status: 200, ms: 3,  time: '14:21:30', tunnel: 'webhook-handler', ip: '10.0.0.1',    size: '0.1 KB' },
+];
+
+const METHOD_COLORS = { GET:'#4d9fff', POST:'#00e87a', PUT:'#f5c542', DELETE:'#ff4d4d', PATCH:'#c084fc', OPTIONS:'#6b7068' };
+
+function statusColor(s) { return s >= 500 ? '#ff4d4d' : s >= 400 ? '#f5c542' : s >= 200 ? '#00e87a' : '#9ba39c'; }
+
+// ── Icons ─────────────────────────────────────────────────────────────────────
+const Icon = ({ d, size = 16, color = 'currentColor', style = {} }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={style}>
+    {Array.isArray(d) ? d.map((p, i) => <path key={i} d={p} />) : <path d={d} />}
+  </svg>
+);
+
+const Icons = {
+  tunnel:  'd M 3 12 h 18 M 12 3 c-2.5 2.5-4 6-4 9s1.5 6.5 4 9 M 12 3 c2.5 2.5 4 6 4 9s-1.5 6.5-4 9',
+  plus:    'M 12 5 v14 M 5 12 h14',
+  stop:    'M 5 5 h14 v14 H 5z',
+  play:    'M 5 3 l14 9-14 9 z',
+  trash:   ['M 3 6 h18', 'M 8 6V4h8v2', 'M 19 6l-1 14H6L5 6'],
+  copy:    ['M 8 8 H5a2 2 0 00-2 2v9a2 2 0 002 2h9a2 2 0 002-2v-3', 'M 8 8 V5a2 2 0 012-2h9a2 2 0 012 2v9a2 2 0 01-2 2h-3'],
+  chevron: 'M 9 18 l6-6-6-6',
+  activity:'M 22 12 h-4l-3 9L9 3l-3 9H2',
+  log:     ['M 4 6 h16', 'M 4 10 h12', 'M 4 14 h16', 'M 4 18 h8'],
+  shield:  ['M 12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'],
+  key:     ['M 21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4'],
+  user:    ['M 20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2', 'M12 11a4 4 0 100-8 4 4 0 000 8z'],
+  ban:     ['M 12 22a10 10 0 100-20 10 10 0 000 20z', 'M4.93 4.93l14.14 14.14'],
+  settings:['M 12 15a3 3 0 100-6 3 3 0 000 6z', 'M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z'],
+  link:    ['M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71', 'M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71'],
+  x:       ['M18 6 6 18', 'M6 6l12 12'],
+  check:   'M 20 6 L9 17 l-5-5',
+  globe:   ['M 12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z', 'M2 12h20', 'M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z'],
+  info:    ['M12 22a10 10 0 100-20 10 10 0 000 20z', 'M12 8v4', 'M12 16h.01'],
+  zap:     'M 13 2 L 3 14 h9 l-1 8 10-12 h-9 z',
+};
+
+// ── Components ────────────────────────────────────────────────────────────────
+function Pill({ children, color }) {
+  return (
+    <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, letterSpacing: '.04em', padding: '2px 6px', border: `1px solid ${color}44`, color, background: color + '14', textTransform: 'uppercase' }}>
+      {children}
+    </span>
+  );
+}
+
+function StatusDot({ status }) {
+  const color = STATUS_COLORS[status] || '#6b7068';
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, boxShadow: status === 'online' ? `0 0 6px ${color}` : 'none', display: 'inline-block', flexShrink: 0, animation: status === 'online' ? 'pulse 2s ease infinite' : 'none' }} />
+    </span>
+  );
+}
+
+function CopyBtn({ text }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(text).catch(()=>{}); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+      style={{ background: 'none', border: 'none', cursor: 'pointer', color: copied ? 'var(--accent)' : 'var(--text-dim)', padding: '2px 4px', display: 'flex', alignItems: 'center', transition: 'color .15s' }}>
+      <Icon d={copied ? Icons.check : Icons.copy} size={12} color="currentColor" />
+    </button>
+  );
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────────────
+function Sidebar({ active, setActive }) {
+  const nav = [
+    { id: 'tunnels', icon: Icons.tunnel, label: 'Tunnels' },
+    { id: 'inspector', icon: Icons.activity, label: 'Inspector' },
+    { id: 'logs', icon: Icons.log, label: 'Logs' },
+    { id: 'access', icon: Icons.shield, label: 'Access' },
+    { id: 'settings', icon: Icons.settings, label: 'Settings' },
+  ];
+  return (
+    <div style={{ width: 200, background: 'var(--panel)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+      {/* Logo */}
+      <div style={{ padding: '20px 16px 16px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ width: 24, height: 24, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon d={Icons.zap} size={14} color="#000" />
+          </div>
+          <span style={{ fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 14, letterSpacing: '.06em', color: '#fff' }}>tunnelr</span>
+        </div>
+        <div style={{ marginTop: 4, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>v2.4.1 · connected</div>
+      </div>
+
+      {/* Region badge */}
+      <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 500 }}>Region</div>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <Icon d={Icons.globe} size={11} color="var(--accent)" />
+          us-east-1
+        </div>
+      </div>
+
+      {/* Nav */}
+      <nav style={{ flex: 1, padding: '8px 0' }}>
+        {nav.map(n => (
+          <button key={n.id} onClick={() => setActive(n.id)}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 16px', background: active === n.id ? 'var(--accent-dim)' : 'none', border: 'none', borderLeft: `2px solid ${active === n.id ? 'var(--accent)' : 'transparent'}`, cursor: 'pointer', color: active === n.id ? 'var(--accent)' : 'var(--text-dim)', fontSize: 13, fontFamily: 'var(--sans)', fontWeight: active === n.id ? 500 : 400, textAlign: 'left', transition: 'all .12s' }}>
+            <Icon d={n.icon} size={15} color="currentColor" />
+            {n.label}
+          </button>
+        ))}
+      </nav>
+
+      {/* Account */}
+      <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
+        <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 2 }}>alex@company.io</div>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-mid)' }}>Pro · 3 / 10 tunnels</div>
+        <div style={{ marginTop: 6, height: 3, background: 'var(--border2)' }}>
+          <div style={{ width: '30%', height: '100%', background: 'var(--accent)' }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Tunnels View ──────────────────────────────────────────────────────────────
+function TunnelsView({ tunnels, setTunnels, onSelectTunnel }) {
+  const [newOpen, setNewOpen] = useState(false);
+  const [form, setForm] = useState({ name: '', port: '', proto: 'https', region: 'us-east' });
+  const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+
+  const filtered = tunnels.filter(t => {
+    const matchStatus = filter === 'all' || t.status === filter;
+    const matchSearch = !search || t.name.includes(search) || t.localPort.toString().includes(search);
+    return matchStatus && matchSearch;
+  });
+
+  function toggleTunnel(id) {
+    setTunnels(ts => ts.map(t => t.id === id ? { ...t, status: t.status === 'online' ? 'offline' : 'online', latency: t.status === 'offline' ? Math.floor(Math.random() * 30) + 5 : null } : t));
+  }
+  function deleteTunnel(id) { setTunnels(ts => ts.filter(t => t.id !== id)); }
+  function addTunnel() {
+    if (!form.name || !form.port) return;
+    const id = 'tun_' + Date.now();
+    setTunnels(ts => [...ts, { id, name: form.name, proto: form.proto, localPort: Number(form.port), publicUrl: `${form.name}-${id.slice(-4)}.tunnelr.dev`, status: 'online', region: form.region, requests: 0, bandwidth: '0 B', latency: Math.floor(Math.random()*30)+5, created: 'just now', tags: [] }]);
+    setForm({ name: '', port: '', proto: 'https', region: 'us-east' });
+    setNewOpen(false);
+  }
+
+  const statCounts = { all: tunnels.length, online: tunnels.filter(t=>t.status==='online').length, offline: tunnels.filter(t=>t.status==='offline').length };
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: '#fff', letterSpacing: '-.01em' }}>Tunnels</div>
+          <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 1 }}>{statCounts.online} active · {statCounts.offline} offline</div>
+        </div>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…"
+          style={{ background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '6px 10px', fontSize: 12, fontFamily: 'var(--sans)', width: 160, outline: 'none' }} />
+        <button onClick={() => setNewOpen(true)}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--accent)', border: 'none', color: '#000', padding: '7px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', letterSpacing: '.02em' }}>
+          <Icon d={Icons.plus} size={13} color="#000" /> New Tunnel
+        </button>
+      </div>
+
+      {/* Filter tabs */}
+      <div style={{ display: 'flex', gap: 0, padding: '0 24px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        {['all','online','offline'].map(f => (
+          <button key={f} onClick={()=>setFilter(f)}
+            style={{ padding: '8px 14px', background: 'none', border: 'none', borderBottom: `2px solid ${filter===f?'var(--accent)':'transparent'}`, color: filter===f?'var(--accent)':'var(--text-dim)', fontSize: 12, cursor: 'pointer', fontFamily: 'var(--sans)', fontWeight: filter===f?500:400, textTransform: 'capitalize', marginBottom: -1, transition: 'all .12s' }}>
+            {f} <span style={{ fontFamily: 'var(--mono)', fontSize: 10, marginLeft: 3, color: 'inherit', opacity: .7 }}>{statCounts[f]}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Table header */}
+      <div style={{ display: 'grid', gridTemplateColumns: '16px 1fr 80px 100px 80px 90px 90px 100px', gap: '0 12px', padding: '6px 24px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        {['', 'Name / URL', 'Proto', 'Local Port', 'Region', 'Requests', 'Bandwidth', 'Actions'].map((h,i) => (
+          <div key={i} style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)' }}>{h}</div>
+        ))}
+      </div>
+
+      {/* Rows */}
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {filtered.map(t => (
+          <TunnelRow key={t.id} tunnel={t} onToggle={toggleTunnel} onDelete={deleteTunnel} onClick={() => onSelectTunnel(t)} />
+        ))}
+        {filtered.length === 0 && (
+          <div style={{ padding: '40px 24px', textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>No tunnels found</div>
+        )}
+      </div>
+
+      {/* New Tunnel Modal */}
+      {newOpen && (
+        <div style={{ position: 'absolute', inset: 0, background: '#00000088', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
+          onClick={() => setNewOpen(false)}>
+          <div style={{ background: 'var(--panel)', border: '1px solid var(--border2)', width: 420, padding: 24 }} onClick={e=>e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: '#fff' }}>New Tunnel</span>
+              <button onClick={() => setNewOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)' }}><Icon d={Icons.x} size={16} color="currentColor" /></button>
+            </div>
+            {[
+              { label: 'Name', key: 'name', placeholder: 'my-api' },
+              { label: 'Local Port', key: 'port', placeholder: '3000' },
+            ].map(f => (
+              <div key={f.key} style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>{f.label}</label>
+                <input value={form[f.key]} onChange={e => setForm(x => ({...x, [f.key]: e.target.value}))} placeholder={f.placeholder}
+                  style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }} />
+              </div>
+            ))}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+              {[
+                { label: 'Protocol', key: 'proto', options: ['https', 'http', 'tcp'] },
+                { label: 'Region', key: 'region', options: ['us-east', 'eu-west', 'ap-south'] },
+              ].map(f => (
+                <div key={f.key}>
+                  <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>{f.label}</label>
+                  <select value={form[f.key]} onChange={e => setForm(x => ({...x, [f.key]: e.target.value}))}
+                    style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 12, fontFamily: 'var(--mono)', outline: 'none' }}>
+                    {f.options.map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+            <button onClick={addTunnel}
+              style={{ width: '100%', background: 'var(--accent)', border: 'none', color: '#000', padding: '10px', fontSize: 13, fontWeight: 600, cursor: 'pointer', letterSpacing: '.03em' }}>
+              Start Tunnel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TunnelRow({ tunnel: t, onToggle, onDelete, onClick }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onClick={onClick}
+      style={{ display: 'grid', gridTemplateColumns: '16px 1fr 80px 100px 80px 90px 90px 100px', gap: '0 12px', padding: '10px 24px', borderBottom: '1px solid var(--border)', cursor: 'pointer', background: hovered ? 'var(--panel2)' : 'transparent', transition: 'background .1s', alignItems: 'center' }}>
+      <StatusDot status={t.status} />
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 500, color: '#fff' }}>{t.name}</span>
+          {t.tags.map(tag => <Pill key={tag} color={tag==='prod'?'#ff4d4d':tag==='db'?'#f5c542':'#4d9fff'}>{tag}</Pill>)}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-dim)' }}>{t.proto}://{t.publicUrl}</span>
+          <CopyBtn text={`${t.proto}://${t.publicUrl}`} />
+          {t.status === 'online' && t.latency && (
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent)', marginLeft: 4 }}>{t.latency}ms</span>
+          )}
+        </div>
+      </div>
+      <div><Pill color={PROTO_COLORS[t.proto] || '#9ba39c'}>{t.proto}</Pill></div>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-mid)' }}>:{t.localPort}</div>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-dim)' }}>{t.region}</div>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-mid)' }}>{t.requests.toLocaleString()}</div>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-mid)' }}>{t.bandwidth}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <button onClick={e=>{e.stopPropagation();onToggle(t.id);}}
+          title={t.status==='online'?'Stop':'Start'}
+          style={{ background: 'none', border: `1px solid var(--border2)`, padding: '4px 6px', cursor: 'pointer', color: t.status==='online'?'var(--text-dim)':'var(--accent)', display: 'flex', alignItems:'center', transition:'all .12s' }}>
+          <Icon d={t.status==='online'?Icons.stop:Icons.play} size={11} color="currentColor" />
+        </button>
+        <button onClick={e=>{e.stopPropagation();onDelete(t.id);}}
+          style={{ background: 'none', border: '1px solid var(--border2)', padding: '4px 6px', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', alignItems: 'center' }}>
+          <Icon d={Icons.trash} size={11} color="currentColor" />
+        </button>
+        <button onClick={e=>{e.stopPropagation(); window.open('#','_blank');}}
+          style={{ background: 'none', border: '1px solid var(--border2)', padding: '4px 6px', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', alignItems: 'center' }}>
+          <Icon d={Icons.link} size={11} color="currentColor" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Inspector View ────────────────────────────────────────────────────────────
+function InspectorView({ tunnels }) {
+  const [selected, setSelected] = useState(null);
+  const [requests, setRequests] = useState(MOCK_REQUESTS);
+  const [filterTunnel, setFilterTunnel] = useState('all');
+  const [liveMode, setLiveMode] = useState(true);
+
+  // Simulate incoming requests
+  useEffect(() => {
+    if (!liveMode) return;
+    const methods = ['GET','POST','PUT','DELETE','PATCH'];
+    const paths = ['/api/data','/api/users','/health','/api/items','/api/config','/webhook'];
+    const statuses = [200,200,200,201,404,500,304];
+    const tuns = tunnels.filter(t=>t.status==='online').map(t=>t.name);
+    if (tuns.length === 0) return;
+    const interval = setInterval(() => {
+      const now = new Date();
+      const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+      const method = methods[Math.floor(Math.random()*methods.length)];
+      const req = { id: 'r'+Date.now(), method, path: paths[Math.floor(Math.random()*paths.length)], status: statuses[Math.floor(Math.random()*statuses.length)], ms: Math.floor(Math.random()*200)+2, time: ts, tunnel: tuns[Math.floor(Math.random()*tuns.length)], ip: '10.0.0.'+Math.floor(Math.random()*254+1), size: (Math.random()*10).toFixed(1)+' KB' };
+      setRequests(rs => [req, ...rs.slice(0, 49)]);
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [liveMode, tunnels]);
+
+  const filtered = filterTunnel === 'all' ? requests : requests.filter(r => r.tunnel === filterTunnel);
+  const onlineTunnels = tunnels.filter(t => t.status === 'online');
+
+  return (
+    <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      {/* Left: request list */}
+      <div style={{ flex: '0 0 480px', display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)' }}>
+        <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: '#fff' }}>Request Inspector</div>
+            <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 1 }}>{filtered.length} requests captured</div>
+          </div>
+          <button onClick={() => setLiveMode(x=>!x)}
+            style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', background: liveMode ? 'var(--accent-dim)' : 'var(--panel2)', border: `1px solid ${liveMode ? 'var(--accent-mid)' : 'var(--border2)'}`, color: liveMode ? 'var(--accent)' : 'var(--text-dim)', fontSize: 11, fontWeight: 600, cursor: 'pointer', letterSpacing: '.04em' }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: liveMode ? 'var(--accent)' : 'var(--text-dim)', display: 'inline-block', animation: liveMode ? 'pulse 1.5s ease infinite' : 'none' }} />
+            {liveMode ? 'LIVE' : 'PAUSED'}
+          </button>
+          <select value={filterTunnel} onChange={e=>setFilterTunnel(e.target.value)}
+            style={{ background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '5px 8px', fontSize: 11, fontFamily: 'var(--mono)', outline: 'none' }}>
+            <option value="all">All tunnels</option>
+            {onlineTunnels.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+          </select>
+        </div>
+
+        {/* Column headers */}
+        <div style={{ display: 'grid', gridTemplateColumns: '60px 60px 1fr 50px 50px', gap: '0 8px', padding: '5px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          {['Time','Method','Path','Status','Dur.'].map(h=>(
+            <div key={h} style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)' }}>{h}</div>
+          ))}
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {filtered.map(r => (
+            <div key={r.id} onClick={() => setSelected(r)}
+              style={{ display: 'grid', gridTemplateColumns: '60px 60px 1fr 50px 50px', gap: '0 8px', padding: '8px 16px', borderBottom: '1px solid var(--border)', cursor: 'pointer', background: selected?.id === r.id ? 'var(--accent-dim)' : 'transparent', borderLeft: selected?.id === r.id ? '2px solid var(--accent)' : '2px solid transparent', transition: 'background .1s', alignItems: 'center' }}>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>{r.time}</span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600, color: METHOD_COLORS[r.method] || '#9ba39c' }}>{r.method}</span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.path}</span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, color: statusColor(r.status) }}>{r.status}</span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>{r.ms}ms</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Right: request detail */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {selected ? (
+          <>
+            <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Pill color={METHOD_COLORS[selected.method] || '#9ba39c'}>{selected.method}</Pill>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: '#fff' }}>{selected.path}</span>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: statusColor(selected.status) }}>{selected.status}</span>
+              </div>
+              <div style={{ marginTop: 6, display: 'flex', gap: 16 }}>
+                {[['Tunnel', selected.tunnel], ['IP', selected.ip], ['Duration', selected.ms+'ms'], ['Size', selected.size], ['Time', selected.time]].map(([k,v]) => (
+                  <div key={k}>
+                    <span style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '.06em' }}>{k} </span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-mid)' }}>{v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+              {[['Request Headers', {'Host': selected.tunnel+'.tunnelr.dev', 'User-Agent': 'curl/7.88.1', 'Accept': '*/*', 'X-Forwarded-For': selected.ip, 'X-Tunnelr-ID': selected.id}],
+                ['Response Headers', {'Content-Type': 'application/json', 'X-Response-Time': selected.ms+'ms', 'Cache-Control': 'no-cache', 'Access-Control-Allow-Origin': '*'}],
+                ['Response Body', null]
+              ].map(([title, headers]) => (
+                <div key={title} style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 8 }}>{title}</div>
+                  <div style={{ background: 'var(--panel2)', border: '1px solid var(--border)', padding: '12px 14px', fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.7 }}>
+                    {headers ? Object.entries(headers).map(([k,v]) => (
+                      <div key={k}><span style={{color:'var(--text-dim)'}}>{k}: </span><span style={{color:'var(--text)'}}>{v}</span></div>
+                    )) : (
+                      <span style={{ color: 'var(--accent)' }}>{`{\n  "success": true,\n  "data": { ... }\n}`}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', fontSize: 13, flexDirection: 'column', gap: 8 }}>
+            <Icon d={Icons.activity} size={32} color="var(--border2)" />
+            <span>Select a request to inspect</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Logs View ─────────────────────────────────────────────────────────────────
+const LOG_ENTRIES = [
+  { t: '14:22:01', level: 'INFO',  msg: 'New connection from 104.21.44.1 → webhook-handler (port 8080)' },
+  { t: '14:22:00', level: 'INFO',  msg: 'GET /api/users 200 11ms [api-server]' },
+  { t: '14:21:58', level: 'WARN',  msg: 'DELETE /api/items/9 404 5ms [api-server] — resource not found' },
+  { t: '14:21:50', level: 'INFO',  msg: 'Heartbeat OK — latency 12ms [api-server]' },
+  { t: '14:21:45', level: 'INFO',  msg: 'Heartbeat OK — latency 28ms [webhook-handler]' },
+  { t: '14:21:40', level: 'INFO',  msg: 'POST /api/auth/login 200 88ms [api-server]' },
+  { t: '14:21:30', level: 'INFO',  msg: 'GET /health 200 3ms [webhook-handler]' },
+  { t: '14:20:15', level: 'ERROR', msg: 'Connection timeout — retry 1/3 [postgres-db]' },
+  { t: '14:20:10', level: 'INFO',  msg: 'Tunnel postgres-db reconnected — tcp://0.tcp.tunnelr.dev:21934' },
+  { t: '14:19:55', level: 'WARN',  msg: 'Rate limit approaching: 940/1000 req/min [api-server]' },
+  { t: '14:19:00', level: 'INFO',  msg: 'Tunnel api-server started — https://api-x7f2.tunnelr.dev → :3000' },
+  { t: '14:18:55', level: 'INFO',  msg: 'Authenticating session: alex@company.io' },
+  { t: '14:18:54', level: 'INFO',  msg: 'Agent started — v2.4.1 / us-east-1' },
+];
+
+function LogsView() {
+  const [logs, setLogs] = useState(LOG_ENTRIES);
+  const [live, setLive] = useState(true);
+  const [levelFilter, setLevelFilter] = useState('ALL');
+  const bottomRef = useRef(null);
+
+  const LEVEL_MSGS = [
+    'Connection established — latency 9ms',
+    'GET /api/status 200 4ms [api-server]',
+    'Heartbeat OK',
+    'Bytes transferred: 1.1 KB',
+    'POST /webhook 201 22ms [webhook-handler]',
+  ];
+  useEffect(() => {
+    if (!live) return;
+    const iv = setInterval(() => {
+      const levels = ['INFO','INFO','INFO','WARN'];
+      const level = levels[Math.floor(Math.random()*levels.length)];
+      const now = new Date();
+      const t = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+      setLogs(ls => [{ t, level, msg: LEVEL_MSGS[Math.floor(Math.random()*LEVEL_MSGS.length)] }, ...ls.slice(0,99)]);
+    }, 3000);
+    return () => clearInterval(iv);
+  }, [live]);
+
+  const LEVEL_COLORS = { INFO: 'var(--text-mid)', WARN: 'var(--yellow)', ERROR: 'var(--red)', DEBUG: '#9b8fff' };
+  const filtered = levelFilter === 'ALL' ? logs : logs.filter(l => l.level === levelFilter);
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: '#fff' }}>System Logs</div>
+          <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 1 }}>{filtered.length} entries</div>
+        </div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {['ALL','INFO','WARN','ERROR'].map(l => (
+            <button key={l} onClick={() => setLevelFilter(l)}
+              style={{ padding: '4px 8px', background: levelFilter===l ? (LEVEL_COLORS[l]||'var(--accent)')+'22' : 'var(--panel2)', border: `1px solid ${levelFilter===l ? (LEVEL_COLORS[l]||'var(--accent)') : 'var(--border2)'}`, color: levelFilter===l ? (LEVEL_COLORS[l]||'var(--accent)') : 'var(--text-dim)', fontSize: 10, fontFamily: 'var(--mono)', fontWeight: 600, cursor: 'pointer', letterSpacing: '.06em' }}>
+              {l}
+            </button>
+          ))}
+        </div>
+        <button onClick={() => setLive(x=>!x)}
+          style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', background: live ? 'var(--accent-dim)' : 'var(--panel2)', border: `1px solid ${live ? 'var(--accent-mid)' : 'var(--border2)'}`, color: live ? 'var(--accent)' : 'var(--text-dim)', fontSize: 11, fontWeight: 600, cursor: 'pointer', letterSpacing: '.04em' }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: live ? 'var(--accent)' : 'var(--text-dim)', display: 'inline-block', animation: live ? 'pulse 1.5s ease infinite' : 'none' }} />
+          {live ? 'LIVE' : 'PAUSED'}
+        </button>
+        <button onClick={() => setLogs([])} style={{ background: 'none', border: '1px solid var(--border2)', padding: '5px 10px', color: 'var(--text-dim)', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--sans)' }}>Clear</button>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 24px', fontFamily: 'var(--mono)', fontSize: 11.5, lineHeight: 1.8 }}>
+        {filtered.map((l, i) => (
+          <div key={i} style={{ display: 'flex', gap: 14, padding: '2px 0', borderBottom: '1px solid var(--border)10' }}>
+            <span style={{ color: 'var(--text-dim)', flexShrink: 0, userSelect: 'none' }}>{l.t}</span>
+            <span style={{ flexShrink: 0, fontWeight: 600, width: 40, color: LEVEL_COLORS[l.level] || 'var(--text-mid)' }}>{l.level}</span>
+            <span style={{ color: l.level==='ERROR' ? 'var(--red)' : l.level==='WARN' ? 'var(--yellow)' : 'var(--text)' }}>{l.msg}</span>
+          </div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
+    </div>
+  );
+}
+
+// ── Settings View ─────────────────────────────────────────────────────────────
+function SettingsView() {
+  const [authToken, setAuthToken] = useState('tk_live_x7f2k9p1m3t8••••••••••••••••');
+  const [showToken, setShowToken] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [settings, setSettings] = useState({
+    reconnect: true, compression: true, inspectHttp: true, maxConns: 10, timeout: 30, logLevel: 'INFO',
+  });
+
+  function save() { setSaved(true); setTimeout(() => setSaved(false), 2000); }
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: 32 }}>
+      <div style={{ maxWidth: 600 }}>
+        <div style={{ fontSize: 15, fontWeight: 600, color: '#fff', marginBottom: 4 }}>Settings</div>
+        <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 28 }}>Agent configuration and account settings</div>
+
+        {/* Auth */}
+        <Section title="Authentication">
+          <Field label="Auth Token" sub="Used to authenticate your tunnelr agent">
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input readOnly value={showToken ? 'tk_live_x7f2k9p1m3t8abcdef1234567890' : authToken}
+                style={{ flex: 1, background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '7px 10px', fontSize: 12, fontFamily: 'var(--mono)', outline: 'none' }} />
+              <button onClick={() => setShowToken(x=>!x)} style={{ background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text-mid)', padding: '7px 10px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--sans)', whiteSpace: 'nowrap' }}>{showToken ? 'Hide' : 'Reveal'}</button>
+              <CopyBtn text="tk_live_x7f2k9p1m3t8abcdef1234567890" />
+            </div>
+          </Field>
+        </Section>
+
+        {/* Tunnel defaults */}
+        <Section title="Tunnel Defaults">
+          <Field label="Max Connections" sub="Per tunnel connection pool size">
+            <input type="number" value={settings.maxConns} onChange={e=>setSettings(s=>({...s,maxConns:e.target.value}))}
+              style={{ width: 100, background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '7px 10px', fontSize: 12, fontFamily: 'var(--mono)', outline: 'none' }} />
+          </Field>
+          <Field label="Idle Timeout" sub="Seconds before idle connection is dropped">
+            <input type="number" value={settings.timeout} onChange={e=>setSettings(s=>({...s,timeout:e.target.value}))}
+              style={{ width: 100, background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '7px 10px', fontSize: 12, fontFamily: 'var(--mono)', outline: 'none' }} />
+          </Field>
+          <Field label="Log Level">
+            <select value={settings.logLevel} onChange={e=>setSettings(s=>({...s,logLevel:e.target.value}))}
+              style={{ background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '7px 10px', fontSize: 12, fontFamily: 'var(--mono)', outline: 'none' }}>
+              {['DEBUG','INFO','WARN','ERROR'].map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+          </Field>
+        </Section>
+
+        {/* Toggles */}
+        <Section title="Features">
+          {[
+            { key: 'reconnect', label: 'Auto-Reconnect', sub: 'Automatically reconnect dropped tunnels' },
+            { key: 'compression', label: 'Response Compression', sub: 'Gzip HTTP responses through the tunnel' },
+            { key: 'inspectHttp', label: 'HTTP Inspector', sub: 'Capture and replay HTTP traffic' },
+          ].map(f => (
+            <Field key={f.key} label={f.label} sub={f.sub}>
+              <Toggle value={settings[f.key]} onChange={v => setSettings(s=>({...s,[f.key]:v}))} />
+            </Field>
+          ))}
+        </Section>
+
+        <button onClick={save}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 20px', background: saved ? 'var(--accent-dim)' : 'var(--accent)', border: 'none', color: saved ? 'var(--accent)' : '#000', fontSize: 13, fontWeight: 600, cursor: 'pointer', letterSpacing: '.02em', transition: 'all .2s' }}>
+          {saved && <Icon d={Icons.check} size={14} color="var(--accent)" />}
+          {saved ? 'Saved' : 'Save Changes'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Section({ title, children }) {
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 12, paddingBottom: 8, borderBottom: '1px solid var(--border)' }}>{title}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>{children}</div>
+    </div>
+  );
+}
+function Field({ label, sub, children }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+      <div>
+        <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{label}</div>
+        {sub && <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>{sub}</div>}
+      </div>
+      <div style={{ flexShrink: 0 }}>{children}</div>
+    </div>
+  );
+}
+function Toggle({ value, onChange }) {
+  return (
+    <div onClick={() => onChange(!value)} style={{ width: 38, height: 20, background: value ? 'var(--accent)' : 'var(--border2)', borderRadius: 10, cursor: 'pointer', position: 'relative', transition: 'background .2s', flexShrink: 0 }}>
+      <div style={{ width: 14, height: 14, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3, left: value ? 21 : 3, transition: 'left .2s' }} />
+    </div>
+  );
+}
+
+// ── Tunnel Detail Panel ───────────────────────────────────────────────────────
+function TunnelDetail({ tunnel, onClose }) {
+  if (!tunnel) return null;
+  return (
+    <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 360, background: 'var(--panel)', borderLeft: '1px solid var(--border2)', display: 'flex', flexDirection: 'column', zIndex: 50, animation: 'slideIn .18s ease' }}>
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <StatusDot status={tunnel.status} />
+        <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: '#fff' }}>{tunnel.name}</span>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)' }}><Icon d={Icons.x} size={16} color="currentColor" /></button>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+        {[
+          ['Public URL', `${tunnel.proto}://${tunnel.publicUrl}`],
+          ['Local Port', `:${tunnel.localPort}`],
+          ['Protocol', tunnel.proto.toUpperCase()],
+          ['Region', tunnel.region],
+          ['Status', tunnel.status],
+          ['Latency', tunnel.latency ? `${tunnel.latency}ms` : '—'],
+          ['Requests', tunnel.requests.toLocaleString()],
+          ['Bandwidth', tunnel.bandwidth],
+          ['Created', tunnel.created],
+        ].map(([k,v]) => (
+          <div key={k} style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 3 }}>{k}</div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text)', wordBreak: 'break-all' }}>{v}</div>
+          </div>
+        ))}
+        <div style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 8 }}>CLI Command</div>
+          <div style={{ background: 'var(--panel2)', border: '1px solid var(--border)', padding: '10px 12px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--accent)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>tunnelr http {tunnel.localPort}</span>
+            <CopyBtn text={`tunnelr http ${tunnel.localPort}`} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Access View ───────────────────────────────────────────────────────────────
+const INIT_TOKENS = [
+  { id: 'tk_1', name: 'Production CI', token: 'tk_live_x7f2k9p1m3t8abcd1234', scopes: ['tunnel:read','tunnel:write'], created: '2025-11-02', lastUsed: '2 min ago', requests: 14820, status: 'active' },
+  { id: 'tk_2', name: 'Monitoring Bot', token: 'tk_live_b3n7q0r5j9w2efgh5678', scopes: ['tunnel:read'], created: '2026-01-14', lastUsed: '1 hr ago', requests: 3041, status: 'active' },
+  { id: 'tk_3', name: 'Local Dev',      token: 'tk_live_c4m1p8s6v3x0ijkl9012', scopes: ['tunnel:read','tunnel:write','log:read'], created: '2026-03-31', lastUsed: '5 days ago', requests: 209, status: 'revoked' },
+];
+
+const INIT_IPS = [
+  { id: 'ip_1', cidr: '192.168.1.0/24', label: 'Office LAN',    action: 'allow', hits: 8204, added: '2025-10-01' },
+  { id: 'ip_2', cidr: '10.0.0.0/8',     label: 'VPN Range',     action: 'allow', hits: 1203, added: '2025-10-01' },
+  { id: 'ip_3', cidr: '203.0.113.7/32', label: 'Blocked actor', action: 'deny',  hits: 47,   added: '2026-02-18' },
+];
+
+const ACCESS_LOG = [
+  { t: '14:22:01', ip: '192.168.1.42',  event: 'AUTH_OK',     token: 'Production CI',  tunnel: 'api-server',      country: 'US' },
+  { t: '14:21:58', ip: '203.0.113.7',   event: 'IP_BLOCKED',  token: '—',              tunnel: 'api-server',      country: 'CN' },
+  { t: '14:21:50', ip: '10.0.0.14',     event: 'AUTH_OK',     token: 'Monitoring Bot', tunnel: 'webhook-handler', country: 'US' },
+  { t: '14:21:40', ip: '198.51.100.22', event: 'AUTH_FAIL',   token: 'invalid key',    tunnel: 'api-server',      country: 'RU' },
+  { t: '14:20:55', ip: '192.168.1.5',   event: 'AUTH_OK',     token: 'Local Dev',      tunnel: 'frontend-dev',    country: 'US' },
+  { t: '14:20:10', ip: '104.21.44.1',   event: 'RATE_LIMIT',  token: 'Production CI',  tunnel: 'api-server',      country: 'US' },
+  { t: '14:19:30', ip: '10.0.0.8',      event: 'AUTH_OK',     token: 'Monitoring Bot', tunnel: 'api-server',      country: 'US' },
+  { t: '14:18:00', ip: '45.33.32.156',  event: 'AUTH_FAIL',   token: 'expired key',    tunnel: 'api-server',      country: 'DE' },
+];
+
+const EVENT_STYLES = {
+  AUTH_OK:    { color: '#00e87a', label: 'AUTH OK' },
+  AUTH_FAIL:  { color: '#ff4d4d', label: 'AUTH FAIL' },
+  IP_BLOCKED: { color: '#ff4d4d', label: 'IP BLOCKED' },
+  RATE_LIMIT: { color: '#f5c542', label: 'RATE LIMIT' },
+};
+
+const ALL_SCOPES = ['tunnel:read','tunnel:write','log:read','log:write','admin'];
+
+function AccessView() {
+  const [tab, setTab] = useState('tokens');
+  const [tokens, setTokens] = useState(INIT_TOKENS);
+  const [ips, setIps] = useState(INIT_IPS);
+  const [accessLog, setAccessLog] = useState(ACCESS_LOG);
+  const [showNew, setShowNew] = useState(false);
+  const [newToken, setNewToken] = useState({ name: '', scopes: ['tunnel:read'] });
+  const [createdToken, setCreatedToken] = useState(null);
+  const [showIpForm, setShowIpForm] = useState(false);
+  const [newIp, setNewIp] = useState({ cidr: '', label: '', action: 'allow' });
+  const [revealed, setRevealed] = useState({});
+
+  // Live access log
+  useEffect(() => {
+    const events = ['AUTH_OK','AUTH_OK','AUTH_OK','AUTH_FAIL','IP_BLOCKED','RATE_LIMIT'];
+    const ips2 = ['192.168.1.42','10.0.0.14','104.21.44.1','198.51.100.99'];
+    const tokens2 = ['Production CI','Monitoring Bot','Local Dev'];
+    const tunnels2 = ['api-server','webhook-handler'];
+    const countries = ['US','US','US','DE','CN','RU'];
+    const iv = setInterval(() => {
+      const now = new Date();
+      const t = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+      const event = events[Math.floor(Math.random()*events.length)];
+      const ip = ips2[Math.floor(Math.random()*ips2.length)];
+      setAccessLog(ls => [{ t, ip, event, token: tokens2[Math.floor(Math.random()*tokens2.length)], tunnel: tunnels2[Math.floor(Math.random()*tunnels2.length)], country: countries[Math.floor(Math.random()*countries.length)] }, ...ls.slice(0,99)]);
+    }, 3500);
+    return () => clearInterval(iv);
+  }, []);
+
+  function revokeToken(id) { setTokens(ts => ts.map(t => t.id===id ? {...t, status:'revoked'} : t)); }
+  function deleteToken(id) { setTokens(ts => ts.filter(t => t.id!==id)); }
+  function createToken() {
+    if (!newToken.name) return;
+    const raw = 'tk_live_' + Math.random().toString(36).slice(2,18);
+    const tok = { id:'tk_'+Date.now(), name:newToken.name, token:raw, scopes:newToken.scopes, created:new Date().toISOString().slice(0,10), lastUsed:'never', requests:0, status:'active' };
+    setTokens(ts => [tok, ...ts]);
+    setCreatedToken(raw);
+    setNewToken({ name:'', scopes:['tunnel:read'] });
+  }
+  function deleteIp(id) { setIps(is => is.filter(i => i.id!==id)); }
+  function addIp() {
+    if (!newIp.cidr) return;
+    setIps(is => [...is, { id:'ip_'+Date.now(), ...newIp, hits:0, added:new Date().toISOString().slice(0,10) }]);
+    setNewIp({ cidr:'', label:'', action:'allow' });
+    setShowIpForm(false);
+  }
+
+  const tabs = [
+    { id:'tokens', label:'API Tokens' },
+    { id:'ips',    label:'IP Rules' },
+    { id:'log',    label:'Access Log' },
+  ];
+
+  return (
+    <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+      {/* Header */}
+      <div style={{ padding:'16px 24px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:12, flexShrink:0 }}>
+        <div style={{ flex:1 }}>
+          <div style={{ fontSize:15, fontWeight:600, color:'#fff' }}>Access Control</div>
+          <div style={{ fontSize:12, color:'var(--text-dim)', marginTop:1 }}>Manage tokens, IP rules, and audit events</div>
+        </div>
+        {tab === 'tokens' && (
+          <button onClick={() => { setShowNew(true); setCreatedToken(null); }}
+            style={{ display:'flex', alignItems:'center', gap:6, background:'var(--accent)', border:'none', color:'#000', padding:'7px 14px', fontSize:12, fontWeight:600, cursor:'pointer', letterSpacing:'.02em' }}>
+            <Icon d={Icons.plus} size={13} color="#000" /> New Token
+          </button>
+        )}
+        {tab === 'ips' && (
+          <button onClick={() => setShowIpForm(true)}
+            style={{ display:'flex', alignItems:'center', gap:6, background:'var(--accent)', border:'none', color:'#000', padding:'7px 14px', fontSize:12, fontWeight:600, cursor:'pointer', letterSpacing:'.02em' }}>
+            <Icon d={Icons.plus} size={13} color="#000" /> Add Rule
+          </button>
+        )}
+      </div>
+
+      {/* Sub-tabs */}
+      <div style={{ display:'flex', padding:'0 24px', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
+        {tabs.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            style={{ padding:'8px 14px', background:'none', border:'none', borderBottom:`2px solid ${tab===t.id?'var(--accent)':'transparent'}`, color:tab===t.id?'var(--accent)':'var(--text-dim)', fontSize:12, cursor:'pointer', fontFamily:'var(--sans)', fontWeight:tab===t.id?500:400, marginBottom:-1, transition:'all .12s' }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div style={{ flex:1, overflowY:'auto' }}>
+
+        {/* ── Tokens ── */}
+        {tab === 'tokens' && (
+          <div>
+            {/* Column headers */}
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 120px 180px 90px 100px 120px', gap:'0 12px', padding:'6px 24px', borderBottom:'1px solid var(--border)' }}>
+              {['Name / Token','Status','Scopes','Requests','Last Used','Actions'].map(h => (
+                <div key={h} style={{ fontSize:10, fontWeight:600, letterSpacing:'.07em', textTransform:'uppercase', color:'var(--text-dim)' }}>{h}</div>
+              ))}
+            </div>
+            {tokens.map(tk => (
+              <div key={tk.id} style={{ display:'grid', gridTemplateColumns:'1fr 120px 180px 90px 100px 120px', gap:'0 12px', padding:'12px 24px', borderBottom:'1px solid var(--border)', alignItems:'center' }}>
+                <div>
+                  <div style={{ fontSize:13, fontWeight:500, color:'#fff', marginBottom:3 }}>{tk.name}</div>
+                  <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                    <span style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--text-dim)' }}>
+                      {revealed[tk.id] ? tk.token : tk.token.slice(0,12)+'••••••••••••'}
+                    </span>
+                    <button onClick={() => setRevealed(r=>({...r,[tk.id]:!r[tk.id]}))}
+                      style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-dim)', fontSize:10, fontFamily:'var(--mono)', padding:'0 3px' }}>
+                      {revealed[tk.id]?'hide':'show'}
+                    </button>
+                    <CopyBtn text={tk.token} />
+                  </div>
+                </div>
+                <div>
+                  <Pill color={tk.status==='active'?'var(--accent)':'var(--text-dim)'}>{tk.status}</Pill>
+                </div>
+                <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
+                  {tk.scopes.map(s => <Pill key={s} color="#4d9fff">{s}</Pill>)}
+                </div>
+                <div style={{ fontFamily:'var(--mono)', fontSize:12, color:'var(--text-mid)' }}>{tk.requests.toLocaleString()}</div>
+                <div style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--text-dim)' }}>{tk.lastUsed}</div>
+                <div style={{ display:'flex', gap:6 }}>
+                  {tk.status==='active' && (
+                    <button onClick={() => revokeToken(tk.id)}
+                      style={{ background:'none', border:'1px solid var(--border2)', padding:'4px 8px', cursor:'pointer', color:'var(--yellow)', fontSize:10, fontFamily:'var(--mono)', fontWeight:600, letterSpacing:'.04em' }}>
+                      REVOKE
+                    </button>
+                  )}
+                  <button onClick={() => deleteToken(tk.id)}
+                    style={{ background:'none', border:'1px solid var(--border2)', padding:'4px 6px', cursor:'pointer', color:'var(--text-dim)', display:'flex', alignItems:'center' }}>
+                    <Icon d={Icons.trash} size={11} color="currentColor" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── IP Rules ── */}
+        {tab === 'ips' && (
+          <div>
+            <div style={{ padding:'12px 24px', background:'var(--panel2)', borderBottom:'1px solid var(--border)', fontSize:12, color:'var(--text-dim)', display:'flex', alignItems:'center', gap:8 }}>
+              <Icon d={Icons.info} size={14} color="var(--text-dim)" />
+              Rules are evaluated top-to-bottom. Deny rules take precedence over allow rules for the same IP.
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'160px 1fr 80px 80px 110px 80px', gap:'0 12px', padding:'6px 24px', borderBottom:'1px solid var(--border)' }}>
+              {['CIDR','Label','Action','Hits','Added',''].map(h => (
+                <div key={h} style={{ fontSize:10, fontWeight:600, letterSpacing:'.07em', textTransform:'uppercase', color:'var(--text-dim)' }}>{h}</div>
+              ))}
+            </div>
+            {ips.map((ip, i) => (
+              <div key={ip.id} style={{ display:'grid', gridTemplateColumns:'160px 1fr 80px 80px 110px 80px', gap:'0 12px', padding:'11px 24px', borderBottom:'1px solid var(--border)', alignItems:'center', background: i%2===0?'transparent':'var(--panel)05' }}>
+                <div style={{ fontFamily:'var(--mono)', fontSize:12, color:'#fff' }}>{ip.cidr}</div>
+                <div style={{ fontSize:12, color:'var(--text-mid)' }}>{ip.label}</div>
+                <Pill color={ip.action==='allow'?'var(--accent)':'var(--red)'}>{ip.action}</Pill>
+                <div style={{ fontFamily:'var(--mono)', fontSize:12, color:'var(--text-dim)' }}>{ip.hits.toLocaleString()}</div>
+                <div style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--text-dim)' }}>{ip.added}</div>
+                <button onClick={() => deleteIp(ip.id)}
+                  style={{ background:'none', border:'1px solid var(--border2)', padding:'4px 6px', cursor:'pointer', color:'var(--text-dim)', display:'flex', alignItems:'center' }}>
+                  <Icon d={Icons.trash} size={11} color="currentColor" />
+                </button>
+              </div>
+            ))}
+            {ips.length === 0 && (
+              <div style={{ padding:'32px 24px', textAlign:'center', color:'var(--text-dim)', fontSize:13 }}>No rules configured — all IPs are allowed</div>
+            )}
+          </div>
+        )}
+
+        {/* ── Access Log ── */}
+        {tab === 'log' && (
+          <div>
+            <div style={{ display:'grid', gridTemplateColumns:'70px 140px 120px 1fr 1fr 40px', gap:'0 12px', padding:'6px 24px', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
+              {['Time','IP','Event','Token','Tunnel',''].map(h => (
+                <div key={h} style={{ fontSize:10, fontWeight:600, letterSpacing:'.07em', textTransform:'uppercase', color:'var(--text-dim)' }}>{h}</div>
+              ))}
+            </div>
+            {accessLog.map((e, i) => {
+              const es = EVENT_STYLES[e.event] || { color:'var(--text-mid)', label:e.event };
+              return (
+                <div key={i} style={{ display:'grid', gridTemplateColumns:'70px 140px 120px 1fr 1fr 40px', gap:'0 12px', padding:'8px 24px', borderBottom:'1px solid var(--border)', alignItems:'center' }}>
+                  <span style={{ fontFamily:'var(--mono)', fontSize:10, color:'var(--text-dim)' }}>{e.t}</span>
+                  <span style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--text)' }}>{e.ip}</span>
+                  <Pill color={es.color}>{es.label}</Pill>
+                  <span style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--text-mid)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{e.token}</span>
+                  <span style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--text-dim)' }}>{e.tunnel}</span>
+                  <span style={{ fontFamily:'var(--mono)', fontSize:10, color:'var(--text-dim)' }}>{e.country}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* New Token Modal */}
+      {showNew && (
+        <div style={{ position:'absolute', inset:0, background:'#00000088', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100 }}
+          onClick={() => { if(createdToken) { setShowNew(false); setCreatedToken(null); } else setShowNew(false); }}>
+          <div style={{ background:'var(--panel)', border:'1px solid var(--border2)', width:440, padding:24 }} onClick={e=>e.stopPropagation()}>
+            {!createdToken ? (
+              <>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
+                  <span style={{ fontSize:14, fontWeight:600, color:'#fff' }}>Create API Token</span>
+                  <button onClick={() => setShowNew(false)} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-dim)' }}><Icon d={Icons.x} size={16} color="currentColor" /></button>
+                </div>
+                <div style={{ marginBottom:14 }}>
+                  <label style={{ display:'block', fontSize:11, color:'var(--text-dim)', marginBottom:4, letterSpacing:'.05em', textTransform:'uppercase' }}>Token Name</label>
+                  <input value={newToken.name} onChange={e=>setNewToken(n=>({...n,name:e.target.value}))} placeholder="e.g. GitHub Actions"
+                    style={{ width:'100%', background:'var(--panel2)', border:'1px solid var(--border2)', color:'var(--text)', padding:'8px 10px', fontSize:13, fontFamily:'var(--mono)', outline:'none' }} />
+                </div>
+                <div style={{ marginBottom:20 }}>
+                  <label style={{ display:'block', fontSize:11, color:'var(--text-dim)', marginBottom:8, letterSpacing:'.05em', textTransform:'uppercase' }}>Scopes</label>
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                    {ALL_SCOPES.map(s => {
+                      const on = newToken.scopes.includes(s);
+                      return (
+                        <button key={s} onClick={() => setNewToken(n => ({ ...n, scopes: on ? n.scopes.filter(x=>x!==s) : [...n.scopes,s] }))}
+                          style={{ padding:'5px 10px', background:on?'var(--accent-dim)':'var(--panel2)', border:`1px solid ${on?'var(--accent-mid)':'var(--border2)'}`, color:on?'var(--accent)':'var(--text-dim)', fontSize:11, fontFamily:'var(--mono)', cursor:'pointer', letterSpacing:'.03em' }}>
+                          {s}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <button onClick={createToken}
+                  style={{ width:'100%', background:'var(--accent)', border:'none', color:'#000', padding:10, fontSize:13, fontWeight:600, cursor:'pointer' }}>
+                  Generate Token
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:16 }}>
+                  <Icon d={Icons.check} size={18} color="var(--accent)" />
+                  <span style={{ fontSize:14, fontWeight:600, color:'#fff' }}>Token Created</span>
+                </div>
+                <div style={{ fontSize:12, color:'var(--text-dim)', marginBottom:12 }}>Copy this token now — it won't be shown again.</div>
+                <div style={{ background:'var(--panel2)', border:'1px solid var(--accent-mid)', padding:'12px 14px', fontFamily:'var(--mono)', fontSize:12, color:'var(--accent)', display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20, wordBreak:'break-all' }}>
+                  <span>{createdToken}</span>
+                  <CopyBtn text={createdToken} />
+                </div>
+                <button onClick={() => { setShowNew(false); setCreatedToken(null); }}
+                  style={{ width:'100%', background:'var(--panel2)', border:'1px solid var(--border2)', color:'var(--text)', padding:10, fontSize:13, cursor:'pointer', fontFamily:'var(--sans)' }}>
+                  Done
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* New IP Rule Modal */}
+      {showIpForm && (
+        <div style={{ position:'absolute', inset:0, background:'#00000088', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100 }}
+          onClick={() => setShowIpForm(false)}>
+          <div style={{ background:'var(--panel)', border:'1px solid var(--border2)', width:380, padding:24 }} onClick={e=>e.stopPropagation()}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
+              <span style={{ fontSize:14, fontWeight:600, color:'#fff' }}>Add IP Rule</span>
+              <button onClick={() => setShowIpForm(false)} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-dim)' }}><Icon d={Icons.x} size={16} color="currentColor" /></button>
+            </div>
+            {[{label:'CIDR',key:'cidr',placeholder:'e.g. 192.168.1.0/24'},{label:'Label',key:'label',placeholder:'e.g. Office LAN'}].map(f => (
+              <div key={f.key} style={{ marginBottom:14 }}>
+                <label style={{ display:'block', fontSize:11, color:'var(--text-dim)', marginBottom:4, letterSpacing:'.05em', textTransform:'uppercase' }}>{f.label}</label>
+                <input value={newIp[f.key]} onChange={e=>setNewIp(n=>({...n,[f.key]:e.target.value}))} placeholder={f.placeholder}
+                  style={{ width:'100%', background:'var(--panel2)', border:'1px solid var(--border2)', color:'var(--text)', padding:'8px 10px', fontSize:13, fontFamily:'var(--mono)', outline:'none' }} />
+              </div>
+            ))}
+            <div style={{ marginBottom:20 }}>
+              <label style={{ display:'block', fontSize:11, color:'var(--text-dim)', marginBottom:8, letterSpacing:'.05em', textTransform:'uppercase' }}>Action</label>
+              <div style={{ display:'flex', gap:8 }}>
+                {['allow','deny'].map(a => (
+                  <button key={a} onClick={() => setNewIp(n=>({...n,action:a}))}
+                    style={{ flex:1, padding:'8px', background:newIp.action===a?(a==='allow'?'var(--accent-dim)':'#ff4d4d22'):'var(--panel2)', border:`1px solid ${newIp.action===a?(a==='allow'?'var(--accent-mid)':'#ff4d4d88'):'var(--border2)'}`, color:newIp.action===a?(a==='allow'?'var(--accent)':'var(--red)'):'var(--text-dim)', fontSize:12, fontFamily:'var(--mono)', fontWeight:600, cursor:'pointer', letterSpacing:'.04em', textTransform:'uppercase' }}>
+                    {a}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button onClick={addIp}
+              style={{ width:'100%', background:'var(--accent)', border:'none', color:'#000', padding:10, fontSize:13, fontWeight:600, cursor:'pointer' }}>
+              Add Rule
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Stats Bar ─────────────────────────────────────────────────────────────────
+function StatsBar({ tunnels }) {
+  const online = tunnels.filter(t => t.status === 'online').length;
+  const totalReqs = tunnels.reduce((a, t) => a + t.requests, 0);
+  const [uptime, setUptime] = useState(99.98);
+  return (
+    <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', flexShrink: 0, background: 'var(--panel)' }}>
+      {[
+        { label: 'Active Tunnels', value: `${online} / ${tunnels.length}`, accent: true },
+        { label: 'Total Requests', value: totalReqs.toLocaleString() },
+        { label: 'Uptime', value: `${uptime}%` },
+        { label: 'Agent', value: 'v2.4.1' },
+        { label: 'Region', value: 'us-east-1' },
+      ].map((s, i) => (
+        <div key={i} style={{ padding: '8px 24px', borderRight: '1px solid var(--border)', minWidth: 120 }}>
+          <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)' }}>{s.label}</div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 500, color: s.accent ? 'var(--accent)' : 'var(--text)', marginTop: 2 }}>{s.value}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
+function App() {
+  const [activeNav, setActiveNav] = useState('tunnels');
+  const [tunnels, setTunnels] = useState(INITIAL_TUNNELS);
+  const [selectedTunnel, setSelectedTunnel] = useState(null);
+
+  return (
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+      <StatsBar tunnels={tunnels} />
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
+        <Sidebar active={activeNav} setActive={v => { setActiveNav(v); setSelectedTunnel(null); }} />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+          {activeNav === 'tunnels' && <TunnelsView tunnels={tunnels} setTunnels={setTunnels} onSelectTunnel={t => setSelectedTunnel(t)} />}
+          {activeNav === 'inspector' && <InspectorView tunnels={tunnels} />}
+          {activeNav === 'logs' && <LogsView />}
+          {activeNav === 'access' && <AccessView />}
+          {activeNav === 'settings' && <SettingsView />}
+          {selectedTunnel && activeNav === 'tunnels' && <TunnelDetail tunnel={selectedTunnel} onClose={() => setSelectedTunnel(null)} />}
+        </div>
+      </div>
+      <style>{`
+        @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+        @keyframes slideIn { from { transform: translateX(20px); opacity:0; } to { transform: translateX(0); opacity:1; } }
+      `}</style>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

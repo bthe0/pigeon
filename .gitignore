@@ -19,6 +19,7 @@ coverage.out
 .idea/
 *.swp
 *.swo
+.omx/
 
 # Test artifacts
 testHome/
