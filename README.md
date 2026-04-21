@@ -21,6 +21,8 @@ internet ────────▶│  pigeon     │◀──────▶�
 - **Background daemon** — persistent connection with exponential-backoff reconnect
 - **Traffic logs** — structured NDJSON logs with `--since` / `--follow` / filter support
 - **Web control panel** — manage tunnels, inspect logs, and restart the daemon from a browser
+- **Geographic & Device Enrichment** — built-in web inspector automatically tracks requests via City, Country, OS, and Browser
+- **Password Protection** — restrict tunnels using a web login form, or programmatically bypass via `?pigeon_password=` query params / Basic Auth
 - **Local-dev mode** — run server + client locally with wildcard DNS and self-signed TLS
 - **Zero dependencies on the client** — single static binary
 
@@ -28,9 +30,13 @@ internet ────────▶│  pigeon     │◀──────▶�
 
 ## Installation
 
+The easiest way to install Pigeon on macOS, Linux, or anywhere else is using Go's package manager:
+
 ```bash
 go install github.com/bthe0/pigeon/cmd/pigeon@latest
 ```
+
+*Note: Make sure the `$(go env GOPATH)/bin` directory is in your system `$PATH`.*
 
 Or build from source:
 
