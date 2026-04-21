@@ -79,6 +79,13 @@ type InspectorEventPayload struct {
 	Status          int               `json:"status"`
 	DurationMs      int               `json:"duration_ms"`
 	Bytes           int               `json:"bytes,omitempty"`
+	City            string            `json:"city,omitempty"`
+	Country         string            `json:"country,omitempty"`
+	CountryCode     string            `json:"country_code,omitempty"`
+	Latitude        float64           `json:"latitude,omitempty"`
+	Longitude       float64           `json:"longitude,omitempty"`
+	Browser         string            `json:"browser,omitempty"`
+	OS              string            `json:"os,omitempty"`
 	RequestHeaders  map[string]string `json:"request_headers,omitempty"`
 	ResponseHeaders map[string]string `json:"response_headers,omitempty"`
 }

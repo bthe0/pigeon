@@ -79,6 +79,8 @@ type Server struct {
 	forwards sync.Map   // forward id → *forward
 	logger   *log.Logger
 	logFile  io.WriteCloser
+	geoCache sync.Map // ip -> geoInfo
+	geoPauseUntil atomic.Int64
 }
 
 // New creates a new Server.
@@ -483,6 +485,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	start := time.Now()
 	requestHeaders := headerToMap(r.Header)
+	clientAddr := clientIP(r.RemoteAddr, r.Header)
+	browser, osName := browserAndOS(r.UserAgent())
+	geo := s.lookupGeo(clientAddr)
 	target, _ := url.Parse("http://" + host)
 	rp := httputil.NewSingleHostReverseProxy(target)
 	rp.Transport = &connTransport{conn: stream}
@@ -503,12 +508,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Time:            time.Now().Format(time.RFC3339),
 			ForwardID:       fwd.id,
 			Domain:          fwd.publicAddr,
-			RemoteAddr:      r.RemoteAddr,
+			RemoteAddr:      clientAddr,
 			Method:          r.Method,
 			Path:            r.URL.RequestURI(),
 			Status:          cw.status,
 			DurationMs:      int(time.Since(start).Milliseconds()),
 			Bytes:           cw.bytes,
+			City:            geo.City,
+			Country:         geo.Country,
+			CountryCode:     geo.CountryCode,
+			Latitude:        geo.Latitude,
+			Longitude:       geo.Longitude,
+			Browser:         browser,
+			OS:              osName,
 			RequestHeaders:  requestHeaders,
 			ResponseHeaders: responseHeaders,
 		},

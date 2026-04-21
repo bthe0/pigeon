@@ -144,6 +144,13 @@ func (c *Client) controlLoop() error {
 					Status:          e.Status,
 					DurationMs:      e.DurationMs,
 					Bytes:           e.Bytes,
+					City:            e.City,
+					Country:         e.Country,
+					CountryCode:     e.CountryCode,
+					Latitude:        e.Latitude,
+					Longitude:       e.Longitude,
+					Browser:         e.Browser,
+					OS:              e.OS,
 					RequestHeaders:  e.RequestHeaders,
 					ResponseHeaders: e.ResponseHeaders,
 				})
