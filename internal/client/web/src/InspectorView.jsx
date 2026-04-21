@@ -1,6 +1,11 @@
+import React, { useState, useEffect } from 'react';
+import { Icon, Icons } from './Icons';
+import { Pill } from './Shared';
+import { statusColor } from './Constants';
+
 const METHOD_COLORS = { GET:'#4d9fff', POST:'#00e87a', PUT:'#f5c542', DELETE:'#ff4d4d', PATCH:'#c084fc', OPTIONS:'#6b7068', HEAD:'#9ba39c' };
 
-function InspectorView({ tunnels }) {
+export function InspectorView({ tunnels }) {
   const [selected, setSelected] = useState(null);
   const [requests, setRequests] = useState([]);
   const [filterTunnel, setFilterTunnel] = useState('all');
@@ -135,3 +140,4 @@ function InspectorView({ tunnels }) {
     </div>
   );
 }
+

@@ -1,4 +1,6 @@
-function LogsView() {
+import React, { useState, useEffect, useRef } from 'react';
+
+export function LogsView() {
   const [logs, setLogs] = useState([]);
   const [live, setLive] = useState(true);
   const [levelFilter, setLevelFilter] = useState('ALL');
@@ -128,3 +130,4 @@ function LogsView() {
     </div>
   );
 }
+

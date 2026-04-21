@@ -1,4 +1,6 @@
-function SettingsView({ config, loading }) {
+import React, { useState } from 'react';
+
+export function SettingsView({ config, loading }) {
   const [authToken, setAuthToken] = useState(config?.token || '');
   const [server, setServer] = useState(config?.server || '');
   const [showToken, setShowToken] = useState(false);
@@ -115,3 +117,4 @@ function Field({ label, sub, children, controlsStyle }) {
     </div>
   );
 }
+

@@ -6,6 +6,10 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"time"
 
 	"embed"
@@ -13,7 +17,7 @@ import (
 	"github.com/bthe0/pigeon/internal/proto"
 )
 
-//go:embed web/*
+//go:embed web/dist/*
 var webFS embed.FS
 
 func randomID(n int) string {
@@ -29,12 +33,40 @@ func randomID(n int) string {
 // AgentVersion is set at build time or by main before starting the web interface.
 var AgentVersion = "dev"
 
-func StartWebInterface(addr string) error {
-	subFS, err := fs.Sub(webFS, "web")
-	if err != nil {
-		return err
+func openBrowser(url string) {
+	var err error
+	switch runtime.GOOS {
+	case "linux":
+		err = exec.Command("xdg-open", url).Start()
+	case "windows":
+		err = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	case "darwin":
+		err = exec.Command("open", url).Start()
+	default:
+		err = fmt.Errorf("unsupported platform")
 	}
-	http.Handle("/", http.FileServer(http.FS(subFS)))
+	if err != nil {
+		fmt.Printf("Error opening browser: %v\n", err)
+	}
+}
+
+func StartWebInterface(addr string) error {
+	var handler http.Handler
+
+	// Try serving from local filesystem first (useful for dev)
+	localDist := filepath.Join("internal", "client", "web", "dist")
+	if _, err := os.Stat(localDist); err == nil {
+		fmt.Printf("Serving web interface from local folder: %s\n", localDist)
+		handler = http.FileServer(http.Dir(localDist))
+	} else {
+		subFS, err := fs.Sub(webFS, "web/dist")
+		if err != nil {
+			return err
+		}
+		handler = http.FileServer(http.FS(subFS))
+	}
+
+	http.Handle("/", handler)
 
 	noCache := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -84,14 +116,14 @@ func StartWebInterface(addr string) error {
 			return
 		}
 		var req struct {
-			Protocol   proto.Protocol `json:"protocol"`
-			LocalAddr  string         `json:"local_addr"`
-			Domain     string         `json:"domain"`
-			RemotePort int            `json:"remote_port"`
-			Expose     string         `json:"expose"`
-			HTTPPassword string       `json:"http_password"`
-			MaxConnections int        `json:"max_connections"`
-			UnavailablePage string    `json:"unavailable_page"`
+			Protocol       proto.Protocol `json:"protocol"`
+			LocalAddr      string         `json:"local_addr"`
+			Domain         string         `json:"domain"`
+			RemotePort     int            `json:"remote_port"`
+			Expose         string         `json:"expose"`
+			HTTPPassword   string         `json:"http_password"`
+			MaxConnections int            `json:"max_connections"`
+			UnavailablePage string         `json:"unavailable_page"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -105,14 +137,14 @@ func StartWebInterface(addr string) error {
 		}
 
 		rule := ForwardRule{
-			ID:         randomID(8),
-			Protocol:   req.Protocol,
-			LocalAddr:  req.LocalAddr,
-			Domain:     req.Domain,
-			RemotePort: req.RemotePort,
-			Expose:     req.Expose,
-			HTTPPassword: req.HTTPPassword,
-			MaxConnections: req.MaxConnections,
+			ID:              randomID(8),
+			Protocol:        req.Protocol,
+			LocalAddr:       req.LocalAddr,
+			Domain:          req.Domain,
+			RemotePort:      req.RemotePort,
+			Expose:          req.Expose,
+			HTTPPassword:    req.HTTPPassword,
+			MaxConnections:  req.MaxConnections,
 			UnavailablePage: req.UnavailablePage,
 		}
 		if err := cfg.AddForward(rule); err != nil {
@@ -201,6 +233,13 @@ func StartWebInterface(addr string) error {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	fmt.Printf("Web interface running on http://%s\n", addr)
+	url := fmt.Sprintf("http://%s", addr)
+	fmt.Printf("Web interface running on %s\n", url)
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		openBrowser(url)
+	}()
+
 	return http.ListenAndServe(addr, nil)
 }
+

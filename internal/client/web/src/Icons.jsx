@@ -1,10 +1,12 @@
-const Icon = ({ d, size = 16, color = 'currentColor', style = {} }) => (
+import React from 'react';
+
+export const Icon = ({ d, size = 16, color = 'currentColor', style = {} }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={style}>
     {Array.isArray(d) ? d.map((p, i) => <path key={i} d={p} />) : <path d={d} />}
   </svg>
 );
 
-const Icons = {
+export const Icons = {
   tunnel:  'M 3 12 h 18 M 12 3 c-2.5 2.5-4 6-4 9s1.5 6.5 4 9 M 12 3 c2.5 2.5 4 6 4 9s-1.5 6.5-4 9',
   plus:    'M 12 5 v14 M 5 12 h14',
   stop:    'M 5 5 h14 v14 H 5z',
@@ -26,3 +28,4 @@ const Icons = {
   toggleOff: ['M 16 6 H 8 a 6 6 0 00 0 12 h 8 a 6 6 0 00 0-12 z', 'M 8 16 a 4 4 0 10 0-8 a 4 4 0 00 0 8 z'],
   lock: ['M 5 11 a7 7 0 0 1 14 0', 'M 3 11 h18 v10 a2 2 0 01-2 2H5a2 2 0 01-2-2z', 'M12 16v2'],
 };
+

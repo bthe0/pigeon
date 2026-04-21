@@ -1,4 +1,7 @@
-function Sidebar({ active, setActive }) {
+import React from 'react';
+import { Icon, Icons } from './Icons';
+
+export function Sidebar({ active, setActive }) {
   const nav = [
     { id: 'tunnels', icon: Icons.tunnel, label: 'Tunnels' },
     { id: 'inspector', icon: Icons.activity, label: 'Inspector' },
@@ -36,3 +39,4 @@ function Sidebar({ active, setActive }) {
     </div>
   );
 }
+

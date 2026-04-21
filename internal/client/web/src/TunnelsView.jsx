@@ -1,3 +1,8 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Icon, Icons } from './Icons';
+import { Pill, StatusDot, CopyBtn } from './Shared';
+import { PROTO_COLORS } from './Constants';
+
 function SkeletonRow() {
   const skel = (w, opacity = 1) => (
     <div style={{ height: 10, width: w, background: 'var(--border2)', borderRadius: 2, animation: 'shimmer 1.6s ease infinite', opacity }} />
@@ -12,7 +17,7 @@ function SkeletonRow() {
   );
 }
 
-function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomain }) {
+export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomain }) {
   const emptyForm = { localAddr: '', domain: '', port: '', proto: 'http', disabled: false, expose: 'both', httpPassword: '', maxConnections: '', unavailablePage: 'default' };
   const localAddrRef = useRef(null);
   const [newOpen, setNewOpen] = useState(false);
@@ -436,3 +441,4 @@ function TunnelRow({ tunnel: t, onDelete, onToggle, onEdit, onCycleExpose, onCli
     </div>
   );
 }
+

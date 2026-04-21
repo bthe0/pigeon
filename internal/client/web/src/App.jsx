@@ -1,3 +1,12 @@
+import React, { useState, useEffect } from 'react';
+import { Icon, Icons } from './Icons';
+import { StatusDot } from './Shared';
+import { Sidebar } from './Sidebar';
+import { TunnelsView } from './TunnelsView';
+import { InspectorView } from './InspectorView';
+import { LogsView } from './LogsView';
+import { SettingsView } from './SettingsView';
+
 function latLonToXY(lat, lon, W, H) {
   return { x: (lon + 180) / 360 * W, y: (90 - lat) / 180 * H };
 }
@@ -255,7 +264,7 @@ function hashNav() {
   return NAV_PAGES.includes(h) ? h : 'tunnels';
 }
 
-function App() {
+export function App() {
   const [activeNav, setActiveNav] = useState(hashNav);
   const [tunnels, setTunnels] = useState([]);
   const [rawConfig, setRawConfig] = useState(null);
@@ -369,4 +378,3 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
