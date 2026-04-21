@@ -1,0 +1,25 @@
+# Binary
+pigeon
+
+# Build output
+*.exe
+*.out
+dist/
+
+# Go
+*.test
+*.prof
+coverage.out
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test artifacts
+testHome/
+*.log
