@@ -3,10 +3,23 @@ function LogsView() {
   const [live, setLive] = useState(true);
   const [levelFilter, setLevelFilter] = useState('ALL');
   const [loading, setLoading] = useState(true);
+  const scrollRef = useRef(null);
+  const stickToBottomRef = useRef(true);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    };
+    onScroll();
+    el.addEventListener('scroll', onScroll);
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
 
   useEffect(() => {
     if (!live) return;
-    const iv = setInterval(async () => {
+    const fetchLogs = async () => {
       try {
         const res = await fetch('/api/logs');
         if (res.ok) {
@@ -35,13 +48,24 @@ function LogsView() {
 
              return { t, level, msg };
           });
-          setLogs([...formatted].reverse());
+          setLogs(formatted);
           setLoading(false);
         }
       } catch (err) { setLoading(false); }
-    }, 1000);
+    };
+    fetchLogs();
+    const iv = setInterval(fetchLogs, 1000);
     return () => clearInterval(iv);
   }, [live]);
+
+  useEffect(() => {
+    if (loading || !stickToBottomRef.current) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+  }, [loading, logs, levelFilter]);
 
   const LEVEL_COLORS = { INFO: 'var(--text-mid)', WARN: 'var(--yellow)', ERROR: 'var(--red)', DEBUG: '#9b8fff' };
   const filtered = levelFilter === 'ALL' ? logs : logs.filter(l => l.level === levelFilter);
@@ -68,7 +92,7 @@ function LogsView() {
         </button>
         <button onClick={() => setLogs([])} style={{ background: 'none', border: '1px solid var(--border2)', padding: '5px 10px', color: 'var(--text-dim)', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--sans)' }}>Clear</button>
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 24px', fontFamily: 'var(--mono)', fontSize: 11.5, lineHeight: 1.8 }}>
+      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '8px 24px', fontFamily: 'var(--mono)', fontSize: 11.5, lineHeight: 1.8 }}>
         {loading ? (
           <div style={{ paddingTop: 16 }}>
             {[
