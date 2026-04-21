@@ -35,6 +35,11 @@ func GenerateCert(domain, certDir string) (certFile, keyFile string, err error) 
 		return
 	}
 	certFile, keyFile = CertPaths(certDir)
+	if _, certErr := os.Stat(certFile); certErr == nil {
+		if _, keyErr := os.Stat(keyFile); keyErr == nil {
+			return certFile, keyFile, nil
+		}
+	}
 
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

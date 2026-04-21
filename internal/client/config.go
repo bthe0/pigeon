@@ -19,6 +19,9 @@ type ForwardRule struct {
 	Disabled   bool           `json:"disabled,omitempty"`
 	PublicAddr string         `json:"public_addr,omitempty"`  // assigned by server after connect
 	Expose     string         `json:"expose,omitempty"`       // "both" | "http" | "https"; default "both"
+	HTTPPassword string       `json:"http_password,omitempty"`
+	MaxConnections int        `json:"max_connections,omitempty"`
+	UnavailablePage string    `json:"unavailable_page,omitempty"`
 }
 
 type Config struct {

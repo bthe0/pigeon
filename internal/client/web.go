@@ -67,6 +67,17 @@ func StartWebInterface(addr string) error {
 		json.NewEncoder(w).Encode(logs)
 	}))
 
+	http.HandleFunc("/api/inspector", noCache(func(w http.ResponseWriter, r *http.Request) {
+		filter := r.URL.Query().Get("filter")
+		entries, err := FetchRecentInspectorEntries(100, filter)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(entries)
+	}))
+
 	http.HandleFunc("/api/forwards", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -78,6 +89,9 @@ func StartWebInterface(addr string) error {
 			Domain     string         `json:"domain"`
 			RemotePort int            `json:"remote_port"`
 			Expose     string         `json:"expose"`
+			HTTPPassword string       `json:"http_password"`
+			MaxConnections int        `json:"max_connections"`
+			UnavailablePage string    `json:"unavailable_page"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -97,6 +111,9 @@ func StartWebInterface(addr string) error {
 			Domain:     req.Domain,
 			RemotePort: req.RemotePort,
 			Expose:     req.Expose,
+			HTTPPassword: req.HTTPPassword,
+			MaxConnections: req.MaxConnections,
+			UnavailablePage: req.UnavailablePage,
 		}
 		if err := cfg.AddForward(rule); err != nil {
 			http.Error(w, string(err.Error()), http.StatusBadRequest)

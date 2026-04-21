@@ -131,6 +131,23 @@ func (c *Client) controlLoop() error {
 			var e proto.ErrorPayload
 			proto.DecodePayload(msg, &e)
 			log.Printf("server error: %s", e.Message)
+		case proto.MsgInspectorEvent:
+			var e proto.InspectorEventPayload
+			if err := proto.DecodePayload(msg, &e); err == nil {
+				_ = appendInspectorEntry(InspectorEntry{
+					Time:            e.Time,
+					ForwardID:       e.ForwardID,
+					Domain:          e.Domain,
+					RemoteAddr:      e.RemoteAddr,
+					Method:          e.Method,
+					Path:            e.Path,
+					Status:          e.Status,
+					DurationMs:      e.DurationMs,
+					Bytes:           e.Bytes,
+					RequestHeaders:  e.RequestHeaders,
+					ResponseHeaders: e.ResponseHeaders,
+				})
+			}
 		case proto.MsgPing:
 			proto.Write(c.ctrl, proto.Message{Type: proto.MsgPong})
 		}
@@ -303,12 +320,15 @@ func (c *Client) sendForwardAdd(rule ForwardRule) error {
 	return proto.Write(c.ctrl, proto.Message{
 		Type: proto.MsgForwardAdd,
 		Payload: proto.ForwardPayload{
-			ID:         rule.ID,
-			Protocol:   rule.Protocol,
-			LocalAddr:  rule.LocalAddr,
-			Domain:     domain,
-			RemotePort: rule.RemotePort,
-			Expose:     rule.Expose,
+			ID:              rule.ID,
+			Protocol:        rule.Protocol,
+			LocalAddr:       rule.LocalAddr,
+			Domain:          domain,
+			RemotePort:      rule.RemotePort,
+			Expose:          rule.Expose,
+			HTTPPassword:    rule.HTTPPassword,
+			MaxConnections:  rule.MaxConnections,
+			UnavailablePage: rule.UnavailablePage,
 		},
 	})
 }

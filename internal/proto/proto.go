@@ -15,6 +15,7 @@ const (
 	MsgForwardAdd    MessageType = "forward_add"
 	MsgForwardAck    MessageType = "forward_ack"
 	MsgForwardRemove MessageType = "forward_remove"
+	MsgInspectorEvent MessageType = "inspector_event"
 	MsgPing          MessageType = "ping"
 	MsgPong          MessageType = "pong"
 	MsgError         MessageType = "error"
@@ -50,6 +51,9 @@ type ForwardPayload struct {
 	Domain     string   `json:"domain,omitempty"`      // http only
 	RemotePort int      `json:"remote_port,omitempty"` // tcp/udp; 0 = assign random
 	Expose     string   `json:"expose,omitempty"`      // "both" | "http" | "https"; default "both"
+	HTTPPassword string `json:"http_password,omitempty"`
+	MaxConnections int  `json:"max_connections,omitempty"`
+	UnavailablePage string `json:"unavailable_page,omitempty"`
 }
 
 type ForwardAckPayload struct {
@@ -63,6 +67,20 @@ type ForwardRemovePayload struct {
 
 type ErrorPayload struct {
 	Message string `json:"message"`
+}
+
+type InspectorEventPayload struct {
+	Time            string            `json:"time"`
+	ForwardID       string            `json:"forward_id"`
+	Domain          string            `json:"domain"`
+	RemoteAddr      string            `json:"remote_addr"`
+	Method          string            `json:"method"`
+	Path            string            `json:"path"`
+	Status          int               `json:"status"`
+	DurationMs      int               `json:"duration_ms"`
+	Bytes           int               `json:"bytes,omitempty"`
+	RequestHeaders  map[string]string `json:"request_headers,omitempty"`
+	ResponseHeaders map[string]string `json:"response_headers,omitempty"`
 }
 
 // StreamHeader is written at the start of every server-opened data stream.

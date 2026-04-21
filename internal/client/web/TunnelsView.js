@@ -13,7 +13,7 @@ function SkeletonRow() {
 }
 
 function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomain }) {
-  const emptyForm = { localAddr: '', domain: '', port: '', proto: 'http', disabled: false, expose: 'both' };
+  const emptyForm = { localAddr: '', domain: '', port: '', proto: 'http', disabled: false, expose: 'both', httpPassword: '', maxConnections: '', unavailablePage: 'default' };
   const localAddrRef = useRef(null);
   const [newOpen, setNewOpen] = useState(false);
   const [editId, setEditId] = useState(null);
@@ -96,6 +96,8 @@ function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomai
     const isHTTP = form.proto === 'http' || form.proto === 'https';
     const domain = form.domain.trim();
     const port = String(form.port || '').trim();
+    const maxConnections = String(form.maxConnections || '').trim();
+    const httpPassword = String(form.httpPassword || '');
 
     if (!localAddr) {
       errors.localAddr = 'Local address is required.';
@@ -109,6 +111,20 @@ function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomai
       }
     } else if (port && parsePortValue(port) === null) {
       errors.port = 'Remote port must be between 1 and 65535.';
+    }
+
+    if (maxConnections && parsePortValue(maxConnections) === null) {
+      errors.maxConnections = 'Max connections must be between 1 and 65535.';
+    }
+
+    if (isHTTP && httpPassword) {
+      if (httpPassword.trim() !== httpPassword) {
+        errors.httpPassword = 'Password cannot start or end with spaces.';
+      } else if (httpPassword.length < 4) {
+        errors.httpPassword = 'Password must be at least 4 characters.';
+      } else if (httpPassword.length > 128) {
+        errors.httpPassword = 'Password must be 128 characters or fewer.';
+      }
     }
 
     return errors;
@@ -127,13 +143,17 @@ function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomai
         domainVal = `${domainVal}.${baseDomain}`;
       }
       const remotePort = String(form.port || '').trim();
+      const maxConnections = String(form.maxConnections || '').trim();
       const payload = {
         protocol: form.proto,
         local_addr: localAddr,
         domain: domainVal,
         remote_port: remotePort ? parseInt(remotePort, 10) : 0,
         disabled: !!form.disabled,
-        expose: form.expose || 'both'
+        expose: form.expose || 'both',
+        http_password: form.httpPassword || '',
+        max_connections: maxConnections ? parseInt(maxConnections, 10) : 0,
+        unavailable_page: form.unavailablePage || 'default'
       };
       const url = editId ? `/api/forwards/${editId}` : `/api/forwards`;
       const res = await fetch(url, {
@@ -162,7 +182,10 @@ function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomai
         domain: t.domain || undefined,
         remote_port: t.remotePort ? parseInt(t.remotePort) : 0,
         disabled: !t.disabled,
-        expose: t.expose || 'both'
+        expose: t.expose || 'both',
+        http_password: t.httpPassword || '',
+        max_connections: t.maxConnections || 0,
+        unavailable_page: t.unavailablePage || 'default'
       };
       const res = await fetch(`/api/forwards/${t.id}`, {
         method: 'PUT',
@@ -186,7 +209,10 @@ function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomai
         domain: t.domain || undefined,
         remote_port: t.remotePort ? parseInt(t.remotePort) : 0,
         disabled: !!t.disabled,
-        expose: next
+        expose: next,
+        http_password: t.httpPassword || '',
+        max_connections: t.maxConnections || 0,
+        unavailable_page: t.unavailablePage || 'default'
       };
       const res = await fetch(`/api/forwards/${t.id}`, {
         method: 'PUT',
@@ -202,7 +228,7 @@ function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomai
 
   function openEdit(t) {
     setFormErrors({});
-    setForm({ localAddr: t.localPort, domain: t.domain || '', port: t.remotePort || '', proto: t.proto, disabled: !!t.disabled, expose: t.expose || 'both' });
+    setForm({ localAddr: t.localPort, domain: t.domain || '', port: t.remotePort || '', proto: t.proto, disabled: !!t.disabled, expose: t.expose || 'both', httpPassword: t.httpPassword || '', maxConnections: t.maxConnections || '', unavailablePage: t.unavailablePage || 'default' });
     setEditId(t.id);
     setNewOpen(true);
   }
@@ -225,7 +251,7 @@ function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomai
       </div>
 
       <div style={{ display: 'flex', gap: 0, padding: '0 24px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-        {['all'].map(f => (
+        {['all', 'online', 'offline'].map(f => (
           <button key={f} onClick={()=>setFilter(f)}
             style={{ padding: '8px 14px', background: 'none', border: 'none', borderBottom: `2px solid ${filter===f?'var(--accent)':'transparent'}`, color: filter===f?'var(--accent)':'var(--text-dim)', fontSize: 12, cursor: 'pointer', fontFamily: 'var(--sans)', fontWeight: filter===f?500:400, textTransform: 'capitalize', marginBottom: -1, transition: 'all .12s' }}>
             {f} <span style={{ fontFamily: 'var(--mono)', fontSize: 10, marginLeft: 3, color: 'inherit', opacity: .7 }}>{statCounts[f]}</span>
@@ -296,6 +322,34 @@ function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomai
                 {formErrors.port && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)' }}>{formErrors.port}</div>}
               </div>
             )}
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Max Connections (Optional)</label>
+              <input type="number" min="1" value={form.maxConnections} onChange={e => { const value = e.target.value; setForm(x => ({...x, maxConnections: value})); setFormErrors(x => ({ ...x, maxConnections: undefined })); }} placeholder="Unlimited" disabled={isAdding}
+                style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }} />
+              {formErrors.maxConnections && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)' }}>{formErrors.maxConnections}</div>}
+            </div>
+
+            {(form.proto === 'http' || form.proto === 'https') && (
+              <>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>HTTP Password (Optional)</label>
+                  <input type="password" value={form.httpPassword} onChange={e => { const value = e.target.value; setForm(x => ({...x, httpPassword: value})); setFormErrors(x => ({ ...x, httpPassword: undefined })); }} placeholder="Protect with tunnel password" disabled={isAdding}
+                    style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }} />
+                  {formErrors.httpPassword && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)' }}>{formErrors.httpPassword}</div>}
+                </div>
+
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Unavailable Page</label>
+                  <select value={form.unavailablePage} onChange={e => setForm(x => ({...x, unavailablePage: e.target.value}))} disabled={isAdding}
+                    style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }}>
+                    <option value="default">Default</option>
+                    <option value="minimal">Minimal</option>
+                    <option value="terminal">Terminal</option>
+                  </select>
+                </div>
+              </>
+            )}
             
             <button type="submit" disabled={isAdding}
               style={{ width: '100%', background: isAdding ? 'var(--accent-mid)' : 'var(--accent)', border: 'none', color: '#000', padding: '10px', fontSize: 13, fontWeight: 600, cursor: 'pointer', letterSpacing: '.03em', marginTop: 10 }}>
@@ -354,7 +408,10 @@ function TunnelRow({ tunnel: t, onDelete, onToggle, onEdit, onCycleExpose, onCli
             ? <><span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-dim)' }}>{t.urlScheme}://{t.publicUrl}</span><CopyBtn text={`${t.urlScheme}://${t.publicUrl}`} /></>
             : <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>auto-assigned</span>
           }
-          {t.isLocal && <Pill color="#7c5cfc">local</Pill>}
+          {t.status === 'online' && t.latency && (
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent)', marginLeft: 4 }}>{t.latency}ms</span>
+          )}
+          {t.isLocal && <span style={{ marginLeft: 8 }}><Pill color="#7c5cfc">local</Pill></span>}
         </div>
       </div>
       <div><Pill color={PROTO_COLORS[t.proto] || '#9ba39c'}>{t.proto}</Pill></div>

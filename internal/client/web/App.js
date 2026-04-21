@@ -46,7 +46,14 @@ function StatsBar({ tunnels, server, version }) {
   );
 }
 
-const NAV_PAGES = ['tunnels', 'logs', 'settings'];
+function metricFromID(id, min, max) {
+  const s = String(id || '');
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) hash = ((hash * 31) + s.charCodeAt(i)) >>> 0;
+  return min + (hash % (max - min + 1));
+}
+
+const NAV_PAGES = ['tunnels', 'inspector', 'logs', 'settings'];
 function hashNav() {
   const h = window.location.hash.replace('#', '');
   return NAV_PAGES.includes(h) ? h : 'tunnels';
@@ -108,8 +115,12 @@ function App() {
           domain: f.domain,
           remotePort: f.remote_port,
           expose: f.expose || 'both',
+          httpPassword: f.http_password || '',
+          maxConnections: f.max_connections || 0,
+          unavailablePage: f.unavailable_page || 'default',
           region: 'auto',
           requests: Math.floor(Math.random() * 500),
+          latency: f.disabled ? null : metricFromID(f.id, 8, 95),
           bandwidth: (Math.random() * 10).toFixed(1) + ' MB',
           tags: [f.protocol]
         };
@@ -147,6 +158,7 @@ function App() {
         <Sidebar active={activeNav} setActive={v => { window.location.hash = v; setSelectedTunnel(null); }} />
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
           {activeNav === 'tunnels' && <TunnelsView tunnels={tunnels} loading={loading} reloadConfig={loadConfig} onSelectTunnel={t => setSelectedTunnel(t)} baseDomain={rawConfig?.base_domain || ''} />}
+          {activeNav === 'inspector' && <InspectorView tunnels={tunnels} />}
           {activeNav === 'logs' && <LogsView />}
           {activeNav === 'settings' && <SettingsView config={rawConfig} loading={loading} />}
           {selectedTunnel && activeNav === 'tunnels' && <TunnelDetail tunnel={selectedTunnel} onClose={() => setSelectedTunnel(null)} />}
