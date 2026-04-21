@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/bthe0/pigeon/internal/proto"
@@ -190,41 +191,77 @@ func (c *Client) handleTCPStream(stream net.Conn, rule *ForwardRule, hdr proto.S
 	<-done
 }
 
+// handleUDPStream tunnels UDP traffic using a NAT-table pattern.
+//
+// The server labels every inbound datagram with the external client's address
+// (frame.Addr). We maintain one local socket per distinct external client so
+// that:
+//   - packets always reach the local service from a stable source port, and
+//   - echo replies carry the correct external-client address back to the server
+//     (instead of the local service's address, which was the previous bug).
 func (c *Client) handleUDPStream(stream net.Conn, rule *ForwardRule) {
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
-	if err != nil {
-		return
-	}
-	defer pc.Close()
-
 	localAddr, err := net.ResolveUDPAddr("udp", rule.LocalAddr)
 	if err != nil {
 		return
 	}
 
-	// server → local
-	go func() {
-		dec := json.NewDecoder(stream)
-		for {
-			var frame udpFrame
-			if err := dec.Decode(&frame); err != nil {
-				return
-			}
-			pc.WriteTo(frame.Data, localAddr)
-			c.logTraffic(rule, localAddr.String(), "UDP", "IN", len(frame.Data))
-		}
-	}()
+	var (
+		sessionsMu sync.Mutex
+		sessions   = make(map[string]net.PacketConn) // externalAddr → local socket
+		encMu      sync.Mutex
+		enc        = json.NewEncoder(stream)
+	)
 
-	// local → server
-	enc := json.NewEncoder(stream)
-	buf := make([]byte, 65535)
+	sendToServer := func(extAddr string, data []byte) {
+		encMu.Lock()
+		defer encMu.Unlock()
+		enc.Encode(udpFrame{Addr: extAddr, Data: data})
+	}
+
+	dec := json.NewDecoder(stream)
 	for {
-		n, addr, err := pc.ReadFrom(buf)
-		if err != nil {
+		var frame udpFrame
+		if err := dec.Decode(&frame); err != nil {
 			return
 		}
-		enc.Encode(udpFrame{Addr: addr.String(), Data: buf[:n]})
-		c.logTraffic(rule, addr.String(), "UDP", "OUT", n)
+		extAddr := frame.Addr
+
+		sessionsMu.Lock()
+		localConn, ok := sessions[extAddr]
+		if !ok {
+			// Open a dedicated local socket for this external client.
+			lc, err := net.ListenPacket("udp", "127.0.0.1:0")
+			if err != nil {
+				sessionsMu.Unlock()
+				log.Printf("[%s] UDP session open: %v", rule.ID, err)
+				continue
+			}
+			sessions[extAddr] = lc
+			localConn = lc
+
+			// Reply goroutine: local service → server (with correct external addr).
+			go func(lc net.PacketConn, extAddr string) {
+				defer lc.Close()
+				buf := make([]byte, 65535)
+				for {
+					n, _, err := lc.ReadFrom(buf)
+					if err != nil {
+						return
+					}
+					// Key fix: stamp frame with the EXTERNAL client addr, not the
+					// local service addr, so the server routes the reply correctly.
+					sendToServer(extAddr, buf[:n])
+					c.logTraffic(rule, extAddr, "UDP", "OUT", n)
+				}
+			}(lc, extAddr)
+		}
+		sessionsMu.Unlock()
+
+		if _, err := localConn.WriteTo(frame.Data, localAddr); err != nil {
+			log.Printf("[%s] UDP write local: %v", rule.ID, err)
+			continue
+		}
+		c.logTraffic(rule, extAddr, "UDP", "IN", len(frame.Data))
 	}
 }
 
