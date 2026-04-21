@@ -1,4 +1,4 @@
-# 🐦 Pigeon
+# <img src="assets/logo.png" alt="Pigeon Logo" width="38" align="top" /> Pigeon
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/bthe0/pigeon)](https://goreportcard.com/report/github.com/bthe0/pigeon)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
