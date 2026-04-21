@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"fmt"
 	"log"
+	"net"
 	"os"
+	"os/exec"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/bthe0/pigeon/internal/localdev"
 	"github.com/bthe0/pigeon/internal/proto"
 	"github.com/bthe0/pigeon/internal/server"
+	"github.com/hashicorp/yamux"
 	"github.com/spf13/cobra"
 )
 
@@ -520,23 +523,41 @@ func setupCmd() *cobra.Command {
            proxy_set_header Connection "upgrade";
        }
    }`+"\n", domain, domain)
-				fmt.Println("\n3. Create a Systemd service to keep pigeon running forever:")
-				fmt.Printf(`   sudo tee /etc/systemd/system/pigeon-server.service <<EOF
-[Unit]
+				fmt.Print("\nDo you want to install and start Pigeon as a Systemd service? (y/N): ")
+				installSvc, _ := reader.ReadString('\n')
+				installSvc = strings.ToLower(strings.TrimSpace(installSvc))
+
+				if installSvc == "y" || installSvc == "yes" {
+					execPath, err := os.Executable()
+					if err != nil {
+						fmt.Println("❌ Could not determine executable path.")
+					} else {
+						svcContent := fmt.Sprintf(`[Unit]
 Description=Pigeon Tunnel Server
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/pigeon server --domain %s --token %s --http :8080 --control :2222
+ExecStart=%s server --domain %s --token %s --http :8080 --control :2222
 Restart=always
 User=root
 
 [Install]
 WantedBy=multi-user.target
-EOF`+"\n", domain, token)
-				fmt.Println("\n   Then run:")
-				fmt.Println("   sudo systemctl daemon-reload")
-				fmt.Println("   sudo systemctl enable --now pigeon-server")
+`, execPath, domain, token)
+						err = os.WriteFile("/etc/systemd/system/pigeon-server.service", []byte(svcContent), 0644)
+						if err != nil {
+							fmt.Printf("❌ Failed to write service file (try running setup as root / sudo): %v\n", err)
+						} else {
+							fmt.Println("✅ Service written to /etc/systemd/system/pigeon-server.service")
+							exec.Command("systemctl", "daemon-reload").Run()
+							if err := exec.Command("systemctl", "enable", "--now", "pigeon-server").Run(); err != nil {
+								fmt.Printf("❌ Failed to enable/start service: %v\n", err)
+							} else {
+								fmt.Println("✅ Pigeon Server is now running and enabled on boot!")
+							}
+						}
+					}
+				}
 
 			} else if ans == "2" {
 				fmt.Println("\n=== Pigeon Client Setup ===")
@@ -547,6 +568,14 @@ EOF`+"\n", domain, token)
 				fmt.Print("Enter your Pigeon Auth Token: ")
 				token, _ := reader.ReadString('\n')
 				token = strings.TrimSpace(token)
+
+				fmt.Printf("\nTesting connection to server %s... ", serverAddr)
+				if err := checkServerValidity(serverAddr, token); err != nil {
+					fmt.Printf("\n❌ Failed to connect!\n   Error: %v\n", err)
+					fmt.Println("   Please verify your server address, token, and firewalls, then try again.")
+					return
+				}
+				fmt.Println("✅ Connection successful!")
 
 				cfg := &client.Config{Server: serverAddr, Token: token}
 				if err := client.SaveConfig(cfg); err != nil {
@@ -582,4 +611,45 @@ func randomID(n int) string {
 		time.Sleep(time.Nanosecond)
 	}
 	return string(b)
+}
+
+func checkServerValidity(addr, token string) error {
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	mux, err := yamux.Client(conn, yamux.DefaultConfig())
+	if err != nil {
+		return err
+	}
+	defer mux.Close()
+
+	ctrl, err := mux.Open()
+	if err != nil {
+		return err
+	}
+	defer ctrl.Close()
+
+	if err := proto.Write(ctrl, proto.Message{
+		Type:    proto.MsgAuth,
+		Payload: proto.AuthPayload{Token: token},
+	}); err != nil {
+		return err
+	}
+
+	msg, err := proto.Read(ctrl)
+	if err != nil {
+		return err
+	}
+	if msg.Type == proto.MsgError {
+		var e proto.ErrorPayload
+		proto.DecodePayload(msg, &e)
+		return fmt.Errorf("auth rejected: %s", e.Message)
+	}
+	if msg.Type != proto.MsgAuthAck {
+		return fmt.Errorf("unexpected response: %v", msg.Type)
+	}
+	return nil
 }
