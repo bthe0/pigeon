@@ -76,7 +76,10 @@ function App() {
           proto: f.protocol,
           localPort: f.local_addr,
           publicUrl: pubUrl,
-          status: 'online', 
+          status: f.disabled ? 'offline' : 'online', 
+          disabled: f.disabled,
+          domain: f.domain,
+          remotePort: f.remote_port,
           region: 'auto',
           requests: Math.floor(Math.random() * 500), 
           bandwidth: (Math.random() * 10).toFixed(1) + ' MB', 
@@ -114,7 +117,6 @@ function App() {
         <Sidebar active={activeNav} setActive={v => { setActiveNav(v); setSelectedTunnel(null); }} />
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
           {activeNav === 'tunnels' && <TunnelsView tunnels={tunnels} reloadConfig={loadConfig} onSelectTunnel={t => setSelectedTunnel(t)} />}
-          {activeNav === 'inspector' && <InspectorView tunnels={tunnels} />}
           {activeNav === 'logs' && <LogsView />}
           {activeNav === 'settings' && <SettingsView config={rawConfig} />}
           {selectedTunnel && activeNav === 'tunnels' && <TunnelDetail tunnel={selectedTunnel} onClose={() => setSelectedTunnel(null)} />}

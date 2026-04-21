@@ -150,3 +150,37 @@ func latestNDJSON(dir string) string {
 	sort.Strings(entries)
 	return entries[len(entries)-1]
 }
+
+// FetchRecentLogs returns recent JSON logs as structs.
+func FetchRecentLogs(filter string, limit int) ([]LogEntry, error) {
+	logDir, err := LogDir()
+	if err != nil {
+		return nil, err
+	}
+	latest := latestNDJSON(logDir)
+	var entries []LogEntry
+	if latest == "" {
+		return entries, nil
+	}
+	f, err := os.Open(latest)
+	if err != nil {
+		return entries, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" { continue }
+		var e LogEntry
+		if err := json.Unmarshal([]byte(line), &e); err == nil {
+			if filter == "" || e.ForwardID == filter {
+				entries = append(entries, e)
+			}
+		}
+	}
+	if limit > 0 && len(entries) > limit {
+		entries = entries[len(entries)-limit:]
+	}
+	return entries, nil
+}

@@ -42,6 +42,17 @@ func StartWebInterface(addr string) error {
 		json.NewEncoder(w).Encode(cfg)
 	})
 
+	http.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
+		filter := r.URL.Query().Get("filter")
+		logs, err := FetchRecentLogs(filter, 100)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(logs)
+	})
+
 	http.HandleFunc("/api/forwards", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -83,10 +94,6 @@ func StartWebInterface(addr string) error {
 	})
 
 	http.HandleFunc("/api/forwards/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "DELETE" {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
 		id := r.URL.Path[len("/api/forwards/"):]
 		if id == "" {
 			http.Error(w, "missing id", http.StatusBadRequest)
@@ -99,15 +106,39 @@ func StartWebInterface(addr string) error {
 			return
 		}
 
-		if !cfg.RemoveForward(id) {
-			http.Error(w, "not found", http.StatusNotFound)
+		if r.Method == "DELETE" {
+			if !cfg.RemoveForward(id) {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			if err := SaveConfig(cfg); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
 			return
 		}
-		if err := SaveConfig(cfg); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+
+		if r.Method == "PUT" {
+			var rule ForwardRule
+			if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			rule.ID = id
+			if err := cfg.UpdateForward(id, rule); err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			if err := SaveConfig(cfg); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
 			return
 		}
-		w.WriteHeader(http.StatusOK)
+
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	})
 
 	http.HandleFunc("/api/restart", func(w http.ResponseWriter, r *http.Request) {

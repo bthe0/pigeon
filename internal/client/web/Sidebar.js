@@ -1,7 +1,6 @@
 function Sidebar({ active, setActive }) {
   const nav = [
     { id: 'tunnels', icon: Icons.tunnel, label: 'Tunnels' },
-    { id: 'inspector', icon: Icons.activity, label: 'Inspector' },
     { id: 'logs', icon: Icons.log, label: 'Logs' },
     { id: 'settings', icon: Icons.settings, label: 'Settings' },
   ];

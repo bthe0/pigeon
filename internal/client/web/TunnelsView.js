@@ -1,6 +1,7 @@
 function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
   const [newOpen, setNewOpen] = useState(false);
-  const [form, setForm] = useState({ localAddr: '', domain: '', port: '', proto: 'http' });
+  const [editId, setEditId] = useState(null);
+  const [form, setForm] = useState({ localAddr: '', domain: '', port: '', proto: 'http', disabled: false });
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
@@ -25,7 +26,7 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
     setIsDeleting(false);
   }
 
-  async function addTunnel() {
+  async function saveTunnel() {
     if (!form.localAddr) return;
     setIsAdding(true);
     try {
@@ -33,22 +34,52 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
         protocol: form.proto,
         local_addr: form.localAddr,
         domain: form.domain || undefined,
-        remote_port: form.port ? parseInt(form.port) : 0
+        remote_port: form.port ? parseInt(form.port) : 0,
+        disabled: !!form.disabled
       };
-      const res = await fetch(`/api/forwards`, {
-        method: 'POST',
+      const url = editId ? `/api/forwards/${editId}` : `/api/forwards`;
+      const res = await fetch(url, {
+        method: editId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
       if(!res.ok) throw new Error(await res.text());
       
-      setForm({ localAddr: '', domain: '', port: '', proto: 'http' });
+      setForm({ localAddr: '', domain: '', port: '', proto: 'http', disabled: false });
       setNewOpen(false);
+      setEditId(null);
       await reloadConfig();
     } catch(err) {
-      alert("Error adding tunnel: " + err.message);
+      alert("Error saving tunnel: " + err.message);
     }
     setIsAdding(false);
+  }
+
+  async function toggleTunnel(t) {
+    try {
+      const payload = {
+        protocol: t.proto,
+        local_addr: t.localPort,
+        domain: t.domain || undefined,
+        remote_port: t.remotePort ? parseInt(t.remotePort) : 0,
+        disabled: !t.disabled
+      };
+      const res = await fetch(`/api/forwards/${t.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if(!res.ok) throw new Error(await res.text());
+      await reloadConfig();
+    } catch(err) {
+      alert("Error toggling: " + err.message);
+    }
+  }
+
+  function openEdit(t) {
+    setForm({ localAddr: t.localPort, domain: t.domain || '', port: t.remotePort || '', proto: t.proto, disabled: !!t.disabled });
+    setEditId(t.id);
+    setNewOpen(true);
   }
 
   const statCounts = { all: tunnels.length, online: tunnels.filter(t=>t.status==='online').length, offline: tunnels.filter(t=>t.status==='offline').length };
@@ -62,7 +93,7 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
         </div>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…"
           style={{ background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '6px 10px', fontSize: 12, fontFamily: 'var(--sans)', width: 160, outline: 'none' }} />
-        <button onClick={() => setNewOpen(true)}
+        <button onClick={() => { setEditId(null); setForm({ localAddr: '', domain: '', port: '', proto: 'http', disabled: false }); setNewOpen(true); }}
           style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--accent)', border: 'none', color: '#000', padding: '7px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', letterSpacing: '.02em' }}>
           <Icon d={Icons.plus} size={13} color="#000" /> New Tunnel
         </button>
@@ -85,7 +116,7 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {filtered.map(t => (
-          <TunnelRow key={t.id} tunnel={t} onDelete={deleteTunnel} onClick={() => onSelectTunnel(t)} isDeleting={isDeleting} />
+          <TunnelRow key={t.id} tunnel={t} onDelete={deleteTunnel} onToggle={toggleTunnel} onEdit={openEdit} onClick={() => onSelectTunnel(t)} isDeleting={isDeleting} />
         ))}
         {filtered.length === 0 && (
           <div style={{ padding: '40px 24px', textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>No tunnels found</div>
@@ -97,7 +128,7 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
           onClick={() => !isAdding && setNewOpen(false)}>
           <div style={{ background: 'var(--panel)', border: '1px solid var(--border2)', width: 420, padding: 24 }} onClick={e=>e.stopPropagation()}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#fff' }}>New Tunnel</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: '#fff' }}>{editId ? 'Edit Tunnel' : 'New Tunnel'}</span>
               <button disabled={isAdding} onClick={() => setNewOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)' }}><Icon d={Icons.x} size={16} color="currentColor" /></button>
             </div>
             
@@ -131,9 +162,9 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
               </div>
             )}
             
-            <button onClick={addTunnel} disabled={isAdding}
+            <button onClick={saveTunnel} disabled={isAdding}
               style={{ width: '100%', background: isAdding ? 'var(--accent-mid)' : 'var(--accent)', border: 'none', color: '#000', padding: '10px', fontSize: 13, fontWeight: 600, cursor: 'pointer', letterSpacing: '.03em', marginTop: 10 }}>
-              {isAdding ? 'Starting...' : 'Start Tunnel'}
+              {isAdding ? 'Saving...' : (editId ? 'Save Tunnel' : 'Start Tunnel')}
             </button>
           </div>
         </div>
@@ -142,11 +173,11 @@ function TunnelsView({ tunnels, reloadConfig, onSelectTunnel }) {
   );
 }
 
-function TunnelRow({ tunnel: t, onDelete, onClick, isDeleting }) {
+function TunnelRow({ tunnel: t, onDelete, onToggle, onEdit, onClick, isDeleting }) {
   const [hovered, setHovered] = useState(false);
   return (
     <div onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onClick={onClick}
-      style={{ display: 'grid', gridTemplateColumns: '16px 1fr 80px 100px 90px 90px 100px', gap: '0 12px', padding: '10px 24px', borderBottom: '1px solid var(--border)', cursor: 'pointer', background: hovered ? 'var(--panel2)' : 'transparent', transition: 'background .1s', alignItems: 'center' }}>
+      style={{ display: 'grid', gridTemplateColumns: '16px 1fr 80px 100px 90px 90px 100px', gap: '0 12px', padding: '10px 24px', borderBottom: '1px solid var(--border)', cursor: 'pointer', background: hovered ? 'var(--panel2)' : 'transparent', transition: 'background .1s', alignItems: 'center', opacity: t.disabled ? 0.6 : 1 }}>
       <StatusDot status={t.status} />
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -163,8 +194,16 @@ function TunnelRow({ tunnel: t, onDelete, onClick, isDeleting }) {
       <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-mid)' }}>{t.requests.toLocaleString()}</div>
       <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-mid)' }}>{t.bandwidth}</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <button onClick={e=>{e.stopPropagation();onToggle(t);}} disabled={isDeleting}
+          style={{ background: 'none', border: '1px solid var(--border2)', padding: '4px 6px', cursor: 'pointer', color: t.disabled ? 'var(--text-dim)' : 'var(--accent)', display: 'flex', alignItems: 'center', title: t.disabled ? 'Enable' : 'Disable' }}>
+          <Icon d={t.disabled ? Icons.toggleOff : Icons.toggleOn} size={13} color="currentColor" />
+        </button>
+        <button onClick={e=>{e.stopPropagation();onEdit(t);}} disabled={isDeleting}
+          style={{ background: 'none', border: '1px solid var(--border2)', padding: '4px 6px', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', alignItems: 'center', title: 'Edit' }}>
+          <Icon d={Icons.edit} size={11} color="currentColor" />
+        </button>
         <button onClick={e=>{e.stopPropagation();onDelete(t.id);}} disabled={isDeleting}
-          style={{ background: 'none', border: '1px solid var(--border2)', padding: '4px 6px', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', alignItems: 'center' }}>
+          style={{ background: 'none', border: '1px solid var(--border2)', padding: '4px 6px', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', alignItems: 'center', title: 'Delete' }}>
           <Icon d={Icons.trash} size={11} color="currentColor" />
         </button>
       </div>

@@ -95,6 +95,10 @@ func (c *Client) Connect() error {
 
 	// Register all configured forwards
 	for _, rule := range c.cfg.Forwards {
+		if rule.Disabled {
+			log.Printf("forward %s is disabled, skipping", rule.ID)
+			continue
+		}
 		if err := c.sendForwardAdd(rule); err != nil {
 			log.Printf("forward %s: %v", rule.ID, err)
 		}

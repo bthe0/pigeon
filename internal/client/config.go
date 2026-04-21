@@ -13,8 +13,9 @@ type ForwardRule struct {
 	ID         string        `json:"id"`
 	Protocol   proto.Protocol `json:"protocol"`
 	LocalAddr  string        `json:"local_addr"`
-	Domain     string        `json:"domain,omitempty"`
-	RemotePort int           `json:"remote_port,omitempty"`
+	Domain     string         `json:"domain,omitempty"`
+	RemotePort int            `json:"remote_port,omitempty"`
+	Disabled   bool           `json:"disabled,omitempty"`
 }
 
 type Config struct {
@@ -110,4 +111,14 @@ func (cfg *Config) RemoveForward(id string) bool {
 		}
 	}
 	return false
+}
+
+func (cfg *Config) UpdateForward(id string, rule ForwardRule) error {
+	for i, f := range cfg.Forwards {
+		if f.ID == id {
+			cfg.Forwards[i] = rule
+			return nil
+		}
+	}
+	return fmt.Errorf("forward not found")
 }
