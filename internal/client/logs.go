@@ -200,3 +200,40 @@ func FetchRecentLogs(filter string, limit int) ([]LogEntry, error) {
 	}
 	return entries, nil
 }
+type ForwardMetrics struct {
+	Requests int64 `json:"requests"`
+	Bytes    int64 `json:"bytes"`
+}
+
+// GetMetrics aggregates total requests and bytes from all log files.
+func GetMetrics() (map[string]*ForwardMetrics, error) {
+	logDir, err := LogDir()
+	if err != nil {
+		return nil, err
+	}
+
+	metrics := make(map[string]*ForwardMetrics)
+	files, _ := filepath.Glob(filepath.Join(logDir, "*.ndjson"))
+
+	for _, path := range files {
+		f, err := os.Open(path)
+		if err != nil {
+			continue
+		}
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			var e LogEntry
+			if err := json.Unmarshal(scanner.Bytes(), &e); err == nil && e.ForwardID != "" {
+				m := metrics[e.ForwardID]
+				if m == nil {
+					m = &ForwardMetrics{}
+					metrics[e.ForwardID] = m
+				}
+				m.Requests++
+				m.Bytes += int64(e.Bytes)
+			}
+		}
+		f.Close()
+	}
+	return metrics, nil
+}

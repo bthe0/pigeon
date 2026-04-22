@@ -17,6 +17,14 @@ function flagFromCountryCode(code) {
   return String.fromCodePoint(...cc.split('').map(c => 127397 + c.charCodeAt(0)));
 }
 
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
 function WorldMap({ nodes, onHover, hoveredCity, W=420, H=210 }) {
   return (
     <div style={{ position:'relative', width:'100%', aspectRatio:`${W} / ${H}`, overflow:'hidden', border:'1px solid var(--border)', background:'linear-gradient(180deg, rgba(18,23,20,0.98), rgba(11,15,13,1))' }}>
@@ -329,9 +337,9 @@ export function App() {
           maxConnections: f.max_connections || 0,
           unavailablePage: f.unavailable_page || 'default',
           region: 'auto',
-          requests: Math.floor(Math.random() * 500),
+          requests: f.requests || 0,
           latency: f.disabled ? null : metricFromID(f.id, 8, 95),
-          bandwidth: (Math.random() * 10).toFixed(1) + ' MB',
+          bandwidth: formatBytes(f.bytes || 0),
           tags: [f.protocol]
         };
       });

@@ -22,6 +22,8 @@ type ForwardRule struct {
 	HTTPPassword string       `json:"http_password,omitempty"`
 	MaxConnections int        `json:"max_connections,omitempty"`
 	UnavailablePage string    `json:"unavailable_page,omitempty"`
+	RequestCount    int64     `json:"requests"` // in-memory only
+	ByteCount       int64     `json:"bytes"`    // in-memory only
 }
 
 type Config struct {

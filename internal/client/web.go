@@ -81,6 +81,18 @@ func StartWebInterface(addr string) error {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		// Inject real metrics from logs
+		metrics, _ := GetMetrics()
+		if metrics != nil {
+			for i := range cfg.Forwards {
+				if m, ok := metrics[cfg.Forwards[i].ID]; ok {
+					cfg.Forwards[i].RequestCount = m.Requests
+					cfg.Forwards[i].ByteCount = m.Bytes
+				}
+			}
+		}
+
 		type configResponse struct {
 			*Config
 			Version string `json:"version"`
