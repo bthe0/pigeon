@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -68,7 +69,7 @@ func StartWebInterface(addr string, openBrowser bool) error {
 		return func(w http.ResponseWriter, r *http.Request) {
 			cfg, err := LoadConfig()
 			if err != nil {
-				h(w, r)
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
 
@@ -80,9 +81,6 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			}
 
 			token := r.Header.Get("Authorization")
-			if token == "" {
-				token = r.URL.Query().Get("token")
-			}
 			if strings.HasPrefix(token, "Bearer ") {
 				token = strings.TrimPrefix(token, "Bearer ")
 			}
@@ -159,6 +157,7 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			Value:    sessionValue(cfg.DashboardPassword),
 			Path:     "/",
 			HttpOnly: true,
+			Secure:   requestIsSecure(r),
 			MaxAge:   86400 * 30, // 30 days
 			SameSite: http.SameSiteLaxMode,
 		})
@@ -171,7 +170,9 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			Value:    "",
 			Path:     "/",
 			HttpOnly: true,
+			Secure:   requestIsSecure(r),
 			MaxAge:   -1,
+			SameSite: http.SameSiteLaxMode,
 		})
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -323,4 +324,19 @@ func StartWebInterface(addr string, openBrowser bool) error {
 	}
 
 	return http.ListenAndServe(addr, mux)
+}
+
+func requestIsSecure(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if !strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

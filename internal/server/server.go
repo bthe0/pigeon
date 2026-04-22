@@ -102,12 +102,14 @@ type Server struct {
 	geoCache      sync.Map // ip -> geoInfo
 	geoPauseUntil atomic.Int64
 	passwordFails sync.Map // "fwdID:ip" -> *passwordRateEntry
+	passwordSweep atomic.Int64
 }
 
 type passwordRateEntry struct {
 	mu          sync.Mutex
 	count       int
 	lockedUntil time.Time
+	lastSeen    time.Time
 }
 
 // New creates a new Server.
@@ -468,7 +470,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	fwd := v.(*forward)
 
-	isTLS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	isTLS := requestIsSecure(r)
 
 	// Default to HTTPS if expose is empty or explicitly set to both
 	expose := fwd.expose
@@ -681,7 +683,7 @@ func (s *Server) authorizeTunnelPassword(w http.ResponseWriter, r *http.Request,
 					Value:    passwordCookieValue(s.cfg.Token, fwd),
 					Path:     "/",
 					HttpOnly: true,
-					Secure:   r.TLS != nil,
+					Secure:   requestIsSecure(r),
 					SameSite: http.SameSiteLaxMode,
 				})
 				w.Header().Set("Cache-Control", "no-store")
@@ -699,19 +701,23 @@ const passwordMaxFails = 10
 const passwordLockDuration = 15 * time.Minute
 
 func (s *Server) isPasswordRateLimited(key string) bool {
+	s.sweepPasswordFails()
 	v, _ := s.passwordFails.LoadOrStore(key, &passwordRateEntry{})
 	e := v.(*passwordRateEntry)
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.lastSeen = time.Now()
 	return e.count >= passwordMaxFails && time.Now().Before(e.lockedUntil)
 }
 
 func (s *Server) recordPasswordFail(key string) {
+	s.sweepPasswordFails()
 	v, _ := s.passwordFails.LoadOrStore(key, &passwordRateEntry{})
 	e := v.(*passwordRateEntry)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.count++
+	e.lastSeen = time.Now()
 	if e.count >= passwordMaxFails {
 		e.lockedUntil = time.Now().Add(passwordLockDuration)
 	}
@@ -719,6 +725,42 @@ func (s *Server) recordPasswordFail(key string) {
 
 func (s *Server) clearPasswordFails(key string) {
 	s.passwordFails.Delete(key)
+}
+
+func (s *Server) sweepPasswordFails() {
+	now := time.Now().UnixNano()
+	last := s.passwordSweep.Load()
+	if last != 0 && now-last < int64(5*time.Minute) {
+		return
+	}
+	if !s.passwordSweep.CompareAndSwap(last, now) {
+		return
+	}
+	s.passwordFails.Range(func(k, v any) bool {
+		e := v.(*passwordRateEntry)
+		e.mu.Lock()
+		stale := !e.lastSeen.IsZero() && time.Since(e.lastSeen) > passwordLockDuration
+		e.mu.Unlock()
+		if stale {
+			s.passwordFails.Delete(k)
+		}
+		return true
+	})
+}
+
+func requestIsSecure(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if !strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func passwordCookieName(fwd *forward) string {

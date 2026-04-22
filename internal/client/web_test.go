@@ -39,7 +39,9 @@ func startWeb(t *testing.T, cfg *client.Config) string {
 	// Poll until the server is up (max 2 s).
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		resp, err := http.Get("http://" + addr + "/api/logs?token=" + cfg.Token)
+		req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/api/logs", nil)
+		req.Header.Set("Authorization", "Bearer "+cfg.Token)
+		resp, err := http.DefaultClient.Do(req)
 		if err == nil {
 			resp.Body.Close()
 			return addr
@@ -102,15 +104,15 @@ func TestWebAPI_Auth_BearerToken_Returns200(t *testing.T) {
 	}
 }
 
-func TestWebAPI_Auth_QueryToken_Returns200(t *testing.T) {
+func TestWebAPI_Auth_QueryToken_Returns401(t *testing.T) {
 	addr := startWeb(t, &client.Config{Server: "s:2222", Token: "tok"})
-	resp, err := http.Get("http://" + addr + "/api/config?token=tok")
+	resp, err := http.Get("http://" + addr + "/api/config")
 	if err != nil {
-		t.Fatalf("GET /api/config?token: %v", err)
+		t.Fatalf("GET /api/config: %v", err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("status = %d, want 200", resp.StatusCode)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", resp.StatusCode)
 	}
 }
 
@@ -121,6 +123,35 @@ func TestWebAPI_Auth_WrongToken_Returns401(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", resp.StatusCode)
 	}
+}
+
+func TestWebAPI_Auth_NoConfig_Returns401(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+
+	go func() { client.StartWebInterface(addr, false) }() //nolint
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/api/config", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			if resp.StatusCode == http.StatusUnauthorized {
+				resp.Body.Close()
+				return
+			}
+			resp.Body.Close()
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("web server did not return 401 in time")
 }
 
 // ── /api/login ─────────────────────────────────────────────────────────────────

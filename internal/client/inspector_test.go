@@ -167,3 +167,23 @@ func TestFetchRecentInspectorEntries_MalformedLinesSkipped(t *testing.T) {
 		t.Errorf("expected 1 valid entry (malformed skipped), got %d", len(got))
 	}
 }
+
+func TestNewInspectorWriter_CreatesRestrictedFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	iw, err := client.NewInspectorWriter()
+	if err != nil {
+		t.Fatalf("NewInspectorWriter: %v", err)
+	}
+	defer iw.Close()
+
+	path := filepath.Join(dir, ".pigeon", "logs", "inspector.ndjson")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat inspector log: %v", err)
+	}
+	if mode := info.Mode().Perm(); mode != 0600 {
+		t.Fatalf("mode = %o, want 0600", mode)
+	}
+}

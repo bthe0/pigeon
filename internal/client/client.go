@@ -241,10 +241,11 @@ func (c *Client) handleTCPStream(stream net.Conn, rule *ForwardRule, hdr proto.S
 	var local net.Conn
 	var err error
 	if useTLS {
+		insecureSkipVerify := rule.TLSSkipVerify && c.cfg.LocalDev
 		local, err = tls.DialWithDialer(
 			&net.Dialer{Timeout: 5 * time.Second},
 			"tcp", rule.LocalAddr,
-			&tls.Config{InsecureSkipVerify: rule.TLSSkipVerify}, //nolint:gosec
+			&tls.Config{InsecureSkipVerify: insecureSkipVerify}, //nolint:gosec
 		)
 	} else {
 		local, err = net.DialTimeout("tcp", rule.LocalAddr, 5*time.Second)
