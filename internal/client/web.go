@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -234,16 +235,23 @@ func StartWebInterface(addr string) error {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
+			found := false
 			for i := range cfg.Forwards {
 				if cfg.Forwards[i].ID == id {
 					if v, ok := patch["expose"].(string); ok {
+						log.Printf("[WEB] Updating tunnel %s expose to: %s", id, v)
 						cfg.Forwards[i].Expose = v
 					}
 					if v, ok := patch["disabled"].(bool); ok {
 						cfg.Forwards[i].Disabled = v
 					}
+					found = true
 					break
 				}
+			}
+			if !found {
+				http.Error(w, "tunnel not found", http.StatusNotFound)
+				return
 			}
 			if err := SaveConfig(cfg); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
