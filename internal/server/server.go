@@ -445,6 +445,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fwd := v.(*forward)
 
 	isTLS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	log.Printf("[DEBUG] Tunnel: %s | isTLS: %v | Expose: %s | ProtoHeader: %s", host, isTLS, fwd.expose, r.Header.Get("X-Forwarded-Proto"))
 	switch fwd.expose {
 	case "https":
 		if !isTLS {
@@ -453,7 +454,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	case "http":
 		if isTLS {
-			http.Redirect(w, r, "http://"+host+r.RequestURI, http.StatusMovedPermanently)
+			writeStatusPage(w, http.StatusNotFound, pageVariant(fwd.unavailablePage), "HTTPS disabled", "This tunnel is only available over plain HTTP.")
 			return
 		}
 	}
