@@ -71,6 +71,8 @@ External client → pigeon server (VPS)
 
 7. **Proxy Support:** The server respects `X-Forwarded-Proto` headers (if present) to determine if a request reached it via HTTPS (e.g. through an Nginx reverse proxy).
 
+8. **Web Dashboard Authentication:** The local web interface is protected by a mandatory password (`DashboardPassword` in config). Authentication uses a secure, session-based cookie (`pigeon_session`) instead of query-parameter tokens to prevent credential leakage.
+
 ## Coding Conventions
 
 - **Package layout:** `internal/` for all library code, `cmd/` for the binary entry point.

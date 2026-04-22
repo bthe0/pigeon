@@ -414,7 +414,7 @@ function TunnelRow({ tunnel: t, onDelete, onToggle, onEdit, onCycleExpose, onCli
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
           {t.publicUrl
-            ? <><span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-dim)' }}>{t.urlScheme}://{t.publicUrl}</span><CopyBtn text={`${t.urlScheme}://${t.publicUrl}`} /></>
+            ? <><a href={`${t.urlScheme}://${t.publicUrl}`} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-mid)', textDecoration: 'none', borderBottom: '1px solid transparent', transition: 'all .1s' }} onMouseEnter={e=>{e.target.style.color='var(--accent)'; e.target.style.borderBottom='1px solid var(--accent)';}} onMouseLeave={e=>{e.target.style.color='var(--text-mid)'; e.target.style.borderBottom='1px solid transparent';}}>{t.urlScheme}://{t.publicUrl}</a><CopyBtn text={`${t.urlScheme}://${t.publicUrl}`} /></>
             : <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>auto-assigned</span>
           }
           {!!t.httpPassword && <span><Icon d={Icons.lock} size={11} color="var(--yellow)" title="Protected with HTTP basic auth" /></span>}

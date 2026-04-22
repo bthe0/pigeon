@@ -183,7 +183,11 @@ function TunnelDetail({ tunnel, onClose, dashFetch }) {
           ].map(([k,v]) => (
             <div key={k} style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 3 }}>{k}</div>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text)', wordBreak: 'break-all' }}>{v}</div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text)', wordBreak: 'break-all' }}>
+                {k === 'Public Endpoint' && tunnel.publicUrl ? (
+                  <a href={`${tunnel.urlScheme}://${tunnel.publicUrl}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-mid)', textDecoration: 'none', borderBottom: '1px solid transparent', transition: 'all .1s' }} onMouseEnter={e=>{e.target.style.color='var(--accent)'; e.target.style.borderBottom='1px solid var(--accent)';}} onMouseLeave={e=>{e.target.style.color='var(--text-mid)'; e.target.style.borderBottom='1px solid transparent';}}>{v}</a>
+                ) : v}
+              </div>
             </div>
           ))}
         </div>
@@ -292,6 +296,11 @@ export function App() {
 
   const wrappedFetch = (url, opts) => dashFetch(url, opts, () => setIsAuthorized(false));
 
+  const handleLogout = async () => {
+    await fetch('/api/logout', { method: 'POST' });
+    setIsAuthorized(false);
+  };
+
   useEffect(() => {
     const onHash = () => setActiveNav(hashNav());
     window.addEventListener('hashchange', onHash);
@@ -389,7 +398,7 @@ export function App() {
     <div className="app-layout" style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
       <StatsBar tunnels={tunnels} server={rawConfig?.server} version={rawConfig?.version} />
       <div className="app-layout" style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
-        <Sidebar active={activeNav} setActive={v => { window.location.hash = v; setSelectedTunnel(null); }} />
+        <Sidebar active={activeNav} setActive={v => { window.location.hash = v; setSelectedTunnel(null); }} onLogout={handleLogout} />
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
           {activeNav === 'tunnels' && <TunnelsView tunnels={tunnels} loading={loading} reloadConfig={loadConfig} onSelectTunnel={t => setSelectedTunnel(t)} baseDomain={rawConfig?.base_domain || ''} dashFetch={wrappedFetch} />}
           {activeNav === 'inspector' && <InspectorView tunnels={tunnels} dashFetch={wrappedFetch} />}

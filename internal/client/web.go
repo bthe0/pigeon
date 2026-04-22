@@ -163,6 +163,17 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			MaxAge:   86400 * 30, // 30 days
 			SameSite: http.SameSiteLaxMode,
 		})
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+
+	mux.HandleFunc("/api/logout", noCache(func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "pigeon_session",
+			Value:    "",
+			Path:     "/",
+			HttpOnly: true,
+			MaxAge:   -1,
+		})
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}))
