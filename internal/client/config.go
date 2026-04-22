@@ -136,6 +136,9 @@ func (cfg *Config) UpdateForward(id string, rule ForwardRule) error {
 	cfg.normalizeForward(&rule)
 	for i, f := range cfg.Forwards {
 		if f.ID == id {
+			if rule.ID == "" {
+				rule.ID = id
+			}
 			cfg.Forwards[i] = rule
 			return nil
 		}

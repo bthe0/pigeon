@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"embed"
+
+	"github.com/bthe0/pigeon/internal/proto"
 )
 
 //go:embed web/dist/*
@@ -206,6 +208,9 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
+			}
+			if rule.ID == "" {
+				rule.ID = proto.RandomID(8)
 			}
 			cfg, _ := LoadConfig()
 			if err := cfg.AddForward(rule); err != nil {
