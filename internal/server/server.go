@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
-	"encoding/json"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -43,18 +43,18 @@ type Config struct {
 }
 
 type forward struct {
-	id         string
-	protocol   proto.Protocol
-	localAddr  string
-	publicAddr string
-	domain     string
-	port       int
-	expose     string // "both" | "http" | "https"
-	httpPassword string
-	maxConnections int
+	id              string
+	protocol        proto.Protocol
+	localAddr       string
+	publicAddr      string
+	domain          string
+	port            int
+	expose          string // "both" | "http" | "https"
+	httpPassword    string
+	maxConnections  int
 	unavailablePage string
-	activeConns atomic.Int32
-	session    *session
+	activeConns     atomic.Int32
+	session         *session
 }
 
 type session struct {
@@ -74,12 +74,12 @@ func (s *session) writeMessage(msg proto.Message) error {
 
 // Server is the pigeon tunnel server.
 type Server struct {
-	cfg      Config
-	sessions sync.Map   // domain/port-key → *session
-	forwards sync.Map   // forward id → *forward
-	logger   *log.Logger
-	logFile  io.WriteCloser
-	geoCache sync.Map // ip -> geoInfo
+	cfg           Config
+	sessions      sync.Map // domain/port-key → *session
+	forwards      sync.Map // forward id → *forward
+	logger        *log.Logger
+	logFile       io.WriteCloser
+	geoCache      sync.Map // ip -> geoInfo
 	geoPauseUntil atomic.Int64
 }
 
