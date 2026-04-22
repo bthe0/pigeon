@@ -32,12 +32,12 @@ internet ────────▶│  pigeon     │◀──────▶�
 - **HTTP tunnels** — expose any local HTTP server under a public subdomain
 - **TCP tunnels** — forward raw TCP (Postgres, SSH, Redis, …)
 - **UDP tunnels** — forward UDP traffic with per-source NAT-table multiplexing
-- **TLS / Let's Encrypt** — automatic ACME certs on the server side
-- **Background daemon** — persistent connection with exponential-backoff reconnect
-- **Traffic logs** — structured NDJSON logs with `--since` / `--follow` / filter support
-- **Web control panel** — manage tunnels, inspect logs, and restart the daemon from a browser
-- **Geographic & Device Enrichment** — built-in web inspector automatically tracks requests via City, Country, OS, and Browser
-- **Password Protection** — restrict tunnels using a web login form, or programmatically bypass via `?pigeon_password=` query params / Basic Auth
+- **TLS / Let's Encrypt** — automatic ACME certs or Nginx/Certbot wildcard integration
+- **Background daemon** — persistent connection with automatic dashboard hosting
+- **Traffic metrics** — real-time request counts and bandwidth tracking
+- **Web control panel** — manage tunnels, inspect logs, and monitor traffic from your browser
+- **Geographic & Device Enrichment** — built-in web inspector tracks requests via City, Country, OS, and Browser
+- **Password Protection** — restrict tunnels using a web login form or programmatic bypass
 - **Local-dev mode** — run server + client locally with wildcard DNS and self-signed TLS
 - **Zero dependencies on the client** — single static binary
 
@@ -97,10 +97,13 @@ pigeon server \
 ### 2 — Init the client (on your machine)
 
 ```bash
-pigeon init --server tun.example.com:2222 --token mysecret
+pigeon init \
+  --server tun.example.com:2222 \
+  --token mysecret \
+  --web :8080
 ```
 
-This saves credentials to `~/.pigeon/config.json`.
+This saves credentials and dashboard settings to `~/.pigeon/config.json`.
 
 ### 3 — Add tunnel rules
 
@@ -130,7 +133,7 @@ pigeon forward add udp localhost:7777 --port 7777
 pigeon daemon start
 ```
 
-The daemon connects to the server, registers all configured forwards, and automatically reconnects on disconnect with exponential backoff.
+The daemon connects to the server, registers all configured forwards, and **automatically hosts the web dashboard** on your chosen port. It handles automatic reconnects with exponential backoff.
 
 ---
 
@@ -162,17 +165,17 @@ pigeon forward remove <id|domain|port>
 pigeon forward list
 ```
 
-### `pigeon web` — Start the configuration web interface
+### `pigeon web` — Open the dashboard
 
 ```bash
-pigeon web --addr 127.0.0.1:8080
+pigeon web [--addr 127.0.0.1:8080]
 ```
-This opens a browser-based dashboard where you can:
+This is a shortcut that opens your browser to the dashboard URL. If the daemon isn't running, it will attempt to start a standalone web server. The dashboard allows you to:
 
-- create, edit, enable, disable, and delete tunnels
-- inspect recent logs in the browser
-- restart the daemon from Settings
-- use short local-dev hostnames like `myapp`, which normalize to `myapp.<base-domain>`
+- **Monitor real-time metrics**: View request counts and bandwidth usage per tunnel
+- **Manage tunnels**: Create, edit, enable, disable, and delete tunnels visually
+- **Inspect traffic**: View detailed request logs with geographic and device data
+- **Control daemon**: Restart or reload the background process from Settings
 
 ### `pigeon dev` — Run the full stack locally
 

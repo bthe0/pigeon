@@ -51,7 +51,8 @@ External client → pigeon server (VPS)
                               │
                   pigeon daemon (local machine)
                     ├── HTTP/TCP streams → net.Dial to local service, io.Copy
-                    └── UDP streams → NAT table (one local socket per external source)
+                    ├── UDP streams → NAT table (one local socket per external source)
+                    └── Web Dashboard (:8080 or custom) — internal dashboard server
 ```
 
 ## Key Design Decisions
@@ -64,7 +65,11 @@ External client → pigeon server (VPS)
 
 4. **Config lives at `~/.pigeon/`:** `config.json` for credentials and forward rules, `logs/` for NDJSON traffic logs, `pigeon.pid` for daemon tracking.
 
-5. **Daemon reconnect:** Exponential backoff capped at 30 seconds. The daemon forks via `os/exec` with `PIGEON_DAEMON=1` env var and `Setsid: true`.
+5. **Daemon reconnect & Web Hosting:** Exponential backoff capped at 30 seconds. The daemon forks via `os/exec` with `PIGEON_DAEMON=1`. It automatically hosts the Web UI on a background goroutine using the configured `web_addr`.
+
+6. **Base Domain Discovery:** On connection, the server sends the base domain (e.g. `pigeon.btheo.com`) in the `AuthAck` message. The client persists this locally to normalize subdomain-only inputs in the UI.
+
+7. **Proxy Support:** The server respects `X-Forwarded-Proto` headers (if present) to determine if a request reached it via HTTPS (e.g. through an Nginx reverse proxy).
 
 ## Coding Conventions
 
