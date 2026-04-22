@@ -228,6 +228,32 @@ func StartWebInterface(addr string) error {
 			return
 		}
 
+		if r.Method == "PATCH" {
+			var patch map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			for i := range cfg.Forwards {
+				if cfg.Forwards[i].ID == id {
+					if v, ok := patch["expose"].(string); ok {
+						cfg.Forwards[i].Expose = v
+					}
+					if v, ok := patch["disabled"].(bool); ok {
+						cfg.Forwards[i].Disabled = v
+					}
+					break
+				}
+			}
+			if err := SaveConfig(cfg); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			DaemonReload()
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	})
 
