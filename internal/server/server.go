@@ -453,7 +453,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	case "http":
 		if isTLS {
-			writeStatusPage(w, http.StatusNotFound, pageVariant(fwd.unavailablePage), "HTTPS disabled", "This tunnel is only available over plain HTTP.")
+			http.Redirect(w, r, "http://"+host+r.RequestURI, http.StatusMovedPermanently)
 			return
 		}
 	}
