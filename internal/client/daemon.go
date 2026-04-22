@@ -129,6 +129,18 @@ func DaemonRun(cfg *Config) {
 	writePID(pidFile, os.Getpid())
 	defer os.Remove(pidFile)
 
+	// Start web interface in background
+	go func() {
+		addr := cfg.WebAddr
+		if addr == "" {
+			addr = ":8080"
+		}
+		log.Printf("Web interface starting on %s", addr)
+		if err := StartWebInterface(addr); err != nil {
+			log.Printf("Web interface failed: %v", err)
+		}
+	}()
+
 	reload := make(chan struct{}, 1)
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGHUP)

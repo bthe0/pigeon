@@ -102,7 +102,7 @@ func serverCmd() *cobra.Command {
 // ── pigeon init ────────────────────────────────────────────────────────────────
 
 func initCmd() *cobra.Command {
-	var serverAddr, token string
+	var serverAddr, token, webAddr string
 
 	cmd := &cobra.Command{
 		Use:   "init",
@@ -114,7 +114,21 @@ func initCmd() *cobra.Command {
 			if token == "" {
 				return fmt.Errorf("--token is required")
 			}
-			cfg := &client.Config{Server: serverAddr, Token: token}
+			if webAddr == "" {
+				webAddr = ":8080"
+			}
+			if !strings.Contains(webAddr, ":") {
+				webAddr = ":" + webAddr
+			}
+
+			// Check if port is available
+			ln, err := net.Listen("tcp", webAddr)
+			if err != nil {
+				return fmt.Errorf("port %s is already in use", webAddr)
+			}
+			ln.Close()
+
+			cfg := &client.Config{Server: serverAddr, Token: token, WebAddr: webAddr}
 			if err := client.SaveConfig(cfg); err != nil {
 				return err
 			}
@@ -124,6 +138,7 @@ func initCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&serverAddr, "server", "", "Server address, e.g. tun.example.com:2222")
 	cmd.Flags().StringVar(&token, "token", "", "Shared auth token")
+	cmd.Flags().StringVar(&webAddr, "web", ":8080", "Dashboard listen address")
 	return cmd
 }
 
@@ -350,9 +365,22 @@ func webCmd() *cobra.Command {
 	var addr string
 	cmd := &cobra.Command{
 		Use:   "web",
-		Short: "Start the web configuration interface",
+		Short: "Open or start the web configuration interface",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return client.StartWebInterface(addr)
+			url := "http://" + addr
+			if strings.HasPrefix(addr, ":") {
+				url = "http://127.0.0.1" + addr
+			}
+			fmt.Printf("Opening dashboard at %s\n", url)
+			client.OpenBrowser(url)
+
+			err := client.StartWebInterface(addr)
+			if err != nil && strings.Contains(err.Error(), "address already in use") {
+				// Dashboard is likely already running in the background daemon
+				fmt.Println("Dashboard is already running (likely via the background daemon).")
+				return nil
+			}
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:8080", "Address to run the web interface on")
@@ -569,6 +597,24 @@ WantedBy=multi-user.target
 				token, _ := reader.ReadString('\n')
 				token = strings.TrimSpace(token)
 
+				fmt.Print("Enter Web Dashboard Port (default :8080): ")
+				webAddr, _ := reader.ReadString('\n')
+				webAddr = strings.TrimSpace(webAddr)
+				if webAddr == "" {
+					webAddr = ":8080"
+				}
+				if !strings.Contains(webAddr, ":") {
+					webAddr = ":" + webAddr
+				}
+
+				// Check if port is available
+				ln, err := net.Listen("tcp", webAddr)
+				if err != nil {
+					fmt.Printf("❌ Port %s is already in use by another application. Please choose a different one.\n", webAddr)
+					return
+				}
+				ln.Close()
+
 				fmt.Printf("\nTesting connection to server %s... ", serverAddr)
 				if err := checkServerValidity(serverAddr, token); err != nil {
 					fmt.Printf("\n❌ Failed to connect!\n   Error: %v\n", err)
@@ -577,7 +623,7 @@ WantedBy=multi-user.target
 				}
 				fmt.Println("✅ Connection successful!")
 
-				cfg := &client.Config{Server: serverAddr, Token: token}
+				cfg := &client.Config{Server: serverAddr, Token: token, WebAddr: webAddr}
 				if err := client.SaveConfig(cfg); err != nil {
 					fmt.Printf("Error saving config: %v\n", err)
 				} else {
