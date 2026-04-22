@@ -16,15 +16,29 @@ import (
 	"github.com/hashicorp/yamux"
 )
 
+var streamCopyBufferPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 32*1024)
+		return &b
+	},
+}
+
+func copyStream(dst io.Writer, src io.Reader) {
+	buf := streamCopyBufferPool.Get().(*[]byte)
+	defer streamCopyBufferPool.Put(buf)
+	_, _ = io.CopyBuffer(dst, src, *buf)
+}
+
 // Client manages a single connection to the pigeon server.
 type Client struct {
-	cfg     *Config
-	mux     *yamux.Session
-	ctrl    net.Conn
-	logger  *log.Logger
-	logFile io.WriteCloser
-	inspector *InspectorWriter
-	OnAddr  func(id, publicAddr string) // called when a forward is acknowledged
+	cfg          *Config
+	forwardIndex map[string]*ForwardRule
+	mux          *yamux.Session
+	ctrl         net.Conn
+	logger       *log.Logger
+	logFile      io.WriteCloser
+	inspector    *InspectorWriter
+	OnAddr       func(id, publicAddr string) // called when a forward is acknowledged
 }
 
 // New creates a new Client.
@@ -41,8 +55,24 @@ func New(cfg *Config) (*Client, error) {
 
 	iw, _ := NewInspectorWriter()
 	c := &Client{cfg: cfg, logFile: f, inspector: iw}
+	c.rebuildForwardIndex()
 	c.logger = log.New(io.MultiWriter(os.Stdout, f), "", 0)
 	return c, nil
+}
+
+func (c *Client) rebuildForwardIndex() {
+	c.forwardIndex = make(map[string]*ForwardRule, len(c.cfg.Forwards))
+	for i := range c.cfg.Forwards {
+		fwd := &c.cfg.Forwards[i]
+		c.forwardIndex[fwd.ID] = fwd
+	}
+}
+
+func (c *Client) lookupForward(id string) *ForwardRule {
+	if c.forwardIndex == nil {
+		return nil
+	}
+	return c.forwardIndex[id]
 }
 
 // Connect dials the server, authenticates, and registers all forwards.
@@ -101,6 +131,7 @@ func (c *Client) Connect() error {
 
 	c.mux = mux
 	c.ctrl = ctrl
+	c.rebuildForwardIndex()
 
 	// Register all configured forwards
 	for _, rule := range c.cfg.Forwards {
@@ -190,13 +221,7 @@ func (c *Client) handleStream(stream net.Conn) {
 	}
 
 	// Find the forward rule
-	var rule *ForwardRule
-	for i := range c.cfg.Forwards {
-		if c.cfg.Forwards[i].ID == hdr.ForwardID {
-			rule = &c.cfg.Forwards[i]
-			break
-		}
-	}
+	rule := c.lookupForward(hdr.ForwardID)
 	if rule == nil {
 		log.Printf("unknown forward %s", hdr.ForwardID)
 		return
@@ -234,7 +259,7 @@ func (c *Client) handleTCPStream(stream net.Conn, rule *ForwardRule, hdr proto.S
 
 	done := make(chan struct{}, 2)
 	cp := func(dst io.Writer, src io.Reader) {
-		io.Copy(dst, src)
+		copyStream(dst, src)
 		done <- struct{}{}
 	}
 	go cp(stream, local)
@@ -315,9 +340,6 @@ func (c *Client) handleUDPStream(stream net.Conn, rule *ForwardRule) {
 	}
 }
 
-
-
-
 func (c *Client) sendForwardAdd(rule ForwardRule) error {
 	domain := rule.Domain
 	// For HTTP tunnels with no explicit domain, reuse the previously-assigned
@@ -341,7 +363,6 @@ func (c *Client) sendForwardAdd(rule ForwardRule) error {
 		},
 	})
 }
-
 
 // Close shuts down the client.
 func (c *Client) Close() {
