@@ -10,8 +10,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
+
+	"github.com/bthe0/pigeon/internal/proto"
 )
 
 var (
@@ -68,7 +69,7 @@ func TailLogs(filter string, since time.Duration, limit int, follow bool) error 
 				continue
 			}
 
-			var entry LogEntry
+			var entry proto.TrafficLogEntry
 			if err := json.Unmarshal([]byte(line), &entry); err != nil {
 				// Raw log line (daemon.log)
 				if filter == "" {
@@ -130,7 +131,7 @@ func tailFollow(path, filter string) error {
 		if line == "" {
 			continue
 		}
-		var entry LogEntry
+		var entry proto.TrafficLogEntry
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
 			fmt.Println(line)
 			continue
@@ -141,7 +142,7 @@ func tailFollow(path, filter string) error {
 	}
 }
 
-func printEntry(e LogEntry) {
+func printEntry(e proto.TrafficLogEntry) {
 	t, _ := time.Parse(time.RFC3339, e.Time)
 	fmt.Printf("%s  %-4s  %-8s  %-6s  %s  %s",
 		t.Format("2006-01-02 15:04:05"),
@@ -171,13 +172,13 @@ func latestNDJSON(dir string) string {
 }
 
 // FetchRecentLogs returns recent JSON logs as structs.
-func FetchRecentLogs(filter string, limit int) ([]LogEntry, error) {
+func FetchRecentLogs(filter string, limit int) ([]proto.TrafficLogEntry, error) {
 	logDir, err := LogDir()
 	if err != nil {
 		return nil, err
 	}
 	latest := latestNDJSON(logDir)
-	var entries []LogEntry
+	var entries []proto.TrafficLogEntry
 
 	// Read daemon.log (tail last 50 lines)
 	daemonLog := filepath.Join(logDir, "daemon.log")
@@ -191,7 +192,7 @@ func FetchRecentLogs(filter string, limit int) ([]LogEntry, error) {
 		}
 		
 		scanner := bufio.NewScanner(f)
-		var daemonEntries []LogEntry
+		var daemonEntries []proto.TrafficLogEntry
 		for scanner.Scan() {
 			line := scanner.Text()
 			if line != "" {
@@ -206,7 +207,7 @@ func FetchRecentLogs(filter string, limit int) ([]LogEntry, error) {
 					}
 				}
 
-				daemonEntries = append(daemonEntries, LogEntry{
+				daemonEntries = append(daemonEntries, proto.TrafficLogEntry{
 					Time:      timestamp,
 					Protocol:  "DAEMON",
 					ForwardID: "system",
@@ -227,7 +228,7 @@ func FetchRecentLogs(filter string, limit int) ([]LogEntry, error) {
 			for scanner.Scan() {
 				line := scanner.Text()
 				if line == "" { continue }
-				var e LogEntry
+				var e proto.TrafficLogEntry
 				if err := json.Unmarshal([]byte(line), &e); err == nil {
 					if filter == "" || e.ForwardID == filter {
 						entries = append(entries, e)

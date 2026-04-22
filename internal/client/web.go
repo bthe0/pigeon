@@ -1,7 +1,6 @@
 package client
 
 import (
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -10,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"embed"

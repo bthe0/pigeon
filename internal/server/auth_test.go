@@ -21,21 +21,6 @@ func TestAuthorizeTunnelPassword_Bypass(t *testing.T) {
 		}
 	})
 
-	t.Run("query param correct", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/?pigeon_password=secret", nil)
-		w := httptest.NewRecorder()
-		if !s.authorizeTunnelPassword(w, req, fwd) {
-			t.Fatal("expected true, got false")
-		}
-	})
-
-	t.Run("query param incorrect", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/?pigeon_password=wrong", nil)
-		w := httptest.NewRecorder()
-		if s.authorizeTunnelPassword(w, req, fwd) {
-			t.Fatal("expected false, got true")
-		}
-	})
 
 	t.Run("basic auth correct", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)

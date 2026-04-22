@@ -8,10 +8,11 @@ import (
 	"time"
 
 	"github.com/bthe0/pigeon/internal/client"
+	"github.com/bthe0/pigeon/internal/proto"
 )
 
 // writeNDJSON writes NDJSON log entries to a temp file inside the given log dir.
-func writeNDJSON(t *testing.T, logDir string, entries []client.LogEntry) string {
+func writeNDJSON(t *testing.T, logDir string, entries []proto.TrafficLogEntry) string {
 	t.Helper()
 	path := filepath.Join(logDir, time.Now().Format("2006-01-02")+".ndjson")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
@@ -51,7 +52,7 @@ func TestTailLogs_EmptyDir(t *testing.T) {
 func TestTailLogs_AllEntries(t *testing.T) {
 	logDir := pigeonHome(t)
 
-	entries := []client.LogEntry{
+	entries := []proto.TrafficLogEntry{
 		{Time: time.Now().Format(time.RFC3339), ForwardID: "f1", Protocol: "HTTP", Action: "GET /", RemoteAddr: "1.2.3.4:1234"},
 		{Time: time.Now().Format(time.RFC3339), ForwardID: "f2", Protocol: "TCP", Action: "CONNECT", RemoteAddr: "5.6.7.8:5678"},
 	}
@@ -66,7 +67,7 @@ func TestTailLogs_AllEntries(t *testing.T) {
 func TestTailLogs_FilterByForwardID(t *testing.T) {
 	logDir := pigeonHome(t)
 
-	entries := []client.LogEntry{
+	entries := []proto.TrafficLogEntry{
 		{Time: time.Now().Format(time.RFC3339), ForwardID: "wanted", Protocol: "HTTP", Action: "GET /"},
 		{Time: time.Now().Format(time.RFC3339), ForwardID: "other", Protocol: "TCP", Action: "CONNECT"},
 	}
@@ -81,9 +82,9 @@ func TestTailLogs_FilterByForwardID(t *testing.T) {
 func TestTailLogs_Limit(t *testing.T) {
 	logDir := pigeonHome(t)
 
-	var entries []client.LogEntry
+	var entries []proto.TrafficLogEntry
 	for i := 0; i < 10; i++ {
-		entries = append(entries, client.LogEntry{
+		entries = append(entries, proto.TrafficLogEntry{
 			Time:      time.Now().Format(time.RFC3339),
 			ForwardID: "f1",
 			Protocol:  "HTTP",
@@ -100,19 +101,19 @@ func TestTailLogs_Limit(t *testing.T) {
 func TestTailLogs_Since(t *testing.T) {
 	logDir := pigeonHome(t)
 
-	old := client.LogEntry{
+	old := proto.TrafficLogEntry{
 		Time:      time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
 		ForwardID: "f1",
 		Protocol:  "HTTP",
 		Action:    "GET /old",
 	}
-	recent := client.LogEntry{
+	recent := proto.TrafficLogEntry{
 		Time:      time.Now().Format(time.RFC3339),
 		ForwardID: "f1",
 		Protocol:  "HTTP",
 		Action:    "GET /recent",
 	}
-	writeNDJSON(t, logDir, []client.LogEntry{old, recent})
+	writeNDJSON(t, logDir, []proto.TrafficLogEntry{old, recent})
 
 	// --since 1h should filter out the 2-hour-old entry.
 	if err := client.TailLogs("", time.Hour, 0, false); err != nil {

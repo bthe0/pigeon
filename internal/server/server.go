@@ -404,8 +404,6 @@ func (s *Server) serveUDP(pc net.PacketConn, fwd *forward) {
 	}
 }
 
-	}
-}
 
 // ── HTTP serving ───────────────────────────────────────────────────────────────
 

@@ -3,7 +3,6 @@ package client
 import (
 	"bufio"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
