@@ -290,7 +290,7 @@ export function App() {
   const [tunnels, setTunnels] = useState([]);
   const [rawConfig, setRawConfig] = useState(null);
   const [selectedTunnel, setSelectedTunnel] = useState(null);
-  const [isAuthorized, setIsAuthorized] = useState(true);
+  const [isAuthorized, setIsAuthorized] = useState(null); // null = checking
   const [initError, setInitError] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -321,6 +321,7 @@ export function App() {
         throw new Error(txt);
       }
       setInitError(null);
+      setIsAuthorized(true);
       const cfg = await res.json();
       setRawConfig(cfg);
       
@@ -376,6 +377,8 @@ export function App() {
   useEffect(() => {
     loadConfig();
   }, []);
+
+  if (isAuthorized === null) return null; // wait for first auth check before rendering anything
 
   if (!isAuthorized) {
     return <LoginView onLogin={() => { setIsAuthorized(true); loadConfig(); }} />;

@@ -396,24 +396,24 @@ func webCmd() *cobra.Command {
 
 func devCmd() *cobra.Command {
 	var controlAddr, httpAddr, httpsAddr, token, domain, certDir, logFile string
-	var watch bool
+	var watch, ui bool
 
 	cmd := &cobra.Command{
 		Use:   "dev",
-		Short: "Run server + client locally with self-signed certs and /etc/hosts entries",
+		Short: "Run server + daemon locally with self-signed certs and /etc/hosts entries",
 		Long: `Starts pigeon in local-dev mode:
   • Generates a self-signed certificate for <domain> and *.<domain>
-  • Adds 127.0.0.1 <domain> to /etc/hosts (requires write access, run with sudo)
-  • Adds an /etc/hosts entry for each tunnel as it registers
-  • Starts the server with TLS using the self-signed cert
+  • Configures a DNS resolver so *.<domain> resolves to 127.0.0.1
+  • Starts the tunnel server (TLS via self-signed cert)
+  • Starts the daemon (connects client to server, serves web UI on :8080)
 
-Add --watch to rebuild and restart automatically when any .go file changes.
-For frontend HMR run: cd internal/client/web && farm start
+Flags:
+  --watch   Rebuild and restart the server automatically on .go file changes
+  --ui      Also run 'farm start' for frontend HMR (browser at localhost:9000)
 
 Example:
   sudo pigeon dev --token secret
-  sudo pigeon dev --token secret --watch
-  sudo pigeon dev --domain myapp.local --token secret`,
+  sudo pigeon dev --token secret --watch --ui`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if watch {
 				return runDevWatch(devWatchArgs{
@@ -424,6 +424,7 @@ Example:
 					domain:      domain,
 					certDir:     certDir,
 					logFile:     logFile,
+					ui:          ui,
 				})
 			}
 			if token == "" {
@@ -439,7 +440,6 @@ Example:
 			}
 			log.Printf("Self-signed cert written to %s", certDir)
 
-			// Set up DNS resolver so *.domain resolves to 127.0.0.1 without /etc/hosts wildcards.
 			if err := localdev.SetupResolver(domain); err != nil {
 				log.Printf("Warning: could not write /etc/resolver/%s (%v) — run with sudo", domain, err)
 			} else {
@@ -451,7 +451,6 @@ Example:
 				}
 			}()
 
-			// Write client config so the daemon and web UI know we're in local dev mode.
 			devCfg := &client.Config{
 				Server:     controlAddr,
 				Token:      token,
@@ -479,6 +478,11 @@ Example:
 					log.Printf("Tunnel ready: https://%s", subdomain)
 				},
 			})
+
+			// Start daemon and optional farm dev server as side processes.
+			children := startDevChildren(ui)
+			defer stopChildren(children)
+
 			return s.Start()
 		},
 	}
@@ -516,6 +520,7 @@ Example:
 	cmd.PersistentFlags().StringVar(&certDir, "cert-dir", "", "Directory for dev certs (default ~/.pigeon/dev-certs)")
 	cmd.PersistentFlags().StringVar(&logFile, "log", "", "Traffic log file (default: stdout)")
 	cmd.PersistentFlags().BoolVar(&watch, "watch", false, "Watch .go files and rebuild/restart on changes")
+	cmd.PersistentFlags().BoolVar(&ui, "ui", false, "Also run 'farm start' for frontend HMR")
 	return cmd
 }
 
@@ -524,6 +529,7 @@ Example:
 type devWatchArgs struct {
 	controlAddr, httpAddr, httpsAddr string
 	token, domain, certDir, logFile  string
+	ui                               bool
 }
 
 func runDevWatch(a devWatchArgs) error {
@@ -593,6 +599,10 @@ func runDevWatch(a devWatchArgs) error {
 
 	startChild()
 
+	// Start daemon and optional farm dev server once; they stay up across server restarts.
+	children := startDevChildren(a.ui)
+	defer stopChildren(children)
+
 	// Poll for changed .go files; debounce rapid saves.
 	go func() {
 		mtimes := map[string]time.Time{}
@@ -648,6 +658,70 @@ func runDevWatch(a devWatchArgs) error {
 	<-sigs
 	stopChild()
 	return nil
+}
+
+// startDevChildren launches the daemon and, optionally, the Farm dev server.
+// Both are kept alive independently of server restarts — the daemon reconnects
+// automatically when the server comes back up after a rebuild.
+func startDevChildren(withUI bool) []*exec.Cmd {
+	var children []*exec.Cmd
+
+	// Daemon — connects client to the local dev server and serves the web UI.
+	exe, err := os.Executable()
+	if err == nil {
+		d := exec.Command(exe, "daemon", "run")
+		d.Stdout = os.Stdout
+		d.Stderr = os.Stderr
+		if err := d.Start(); err != nil {
+			log.Printf("Warning: could not start daemon: %v", err)
+		} else {
+			log.Printf("Daemon started (PID %d) — web UI on http://127.0.0.1:8080", d.Process.Pid)
+			children = append(children, d)
+		}
+	}
+
+	// Farm dev server — optional frontend HMR.
+	if withUI {
+		webDir, err := findWebDir()
+		if err != nil {
+			log.Printf("Warning: could not find web dir for --ui: %v", err)
+		} else {
+			f := exec.Command("farm", "start")
+			f.Dir = webDir
+			f.Stdout = os.Stdout
+			f.Stderr = os.Stderr
+			if err := f.Start(); err != nil {
+				log.Printf("Warning: could not start farm (is it installed? npm i -g @farmfe/cli): %v", err)
+			} else {
+				log.Printf("Farm dev server started (PID %d) — frontend HMR on http://localhost:9000", f.Process.Pid)
+				children = append(children, f)
+			}
+		}
+	}
+
+	return children
+}
+
+func stopChildren(children []*exec.Cmd) {
+	for _, c := range children {
+		if c != nil && c.Process != nil {
+			c.Process.Signal(syscall.SIGTERM)
+			c.Wait()
+		}
+	}
+}
+
+// findWebDir returns the path to internal/client/web relative to go.mod root.
+func findWebDir() (string, error) {
+	root, err := findGoModDir()
+	if err != nil {
+		return "", err
+	}
+	webDir := filepath.Join(root, "internal", "client", "web")
+	if _, err := os.Stat(webDir); err != nil {
+		return "", fmt.Errorf("web dir not found at %s", webDir)
+	}
+	return webDir, nil
 }
 
 func findGoModDir() (string, error) {
