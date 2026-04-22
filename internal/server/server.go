@@ -441,7 +441,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	fwd := v.(*forward)
 
-	isTLS := r.TLS != nil
+	isTLS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 	switch fwd.expose {
 	case "https":
 		if !isTLS {
