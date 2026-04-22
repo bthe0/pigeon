@@ -33,7 +33,7 @@ func randomID(n int) string {
 // AgentVersion is set at build time or by main before starting the web interface.
 var AgentVersion = "dev"
 
-func openBrowser(url string) {
+func OpenBrowser(url string) {
 	var err error
 	switch runtime.GOOS {
 	case "linux":
@@ -249,7 +249,7 @@ func StartWebInterface(addr string) error {
 	fmt.Printf("Web interface running on %s\n", url)
 	go func() {
 		time.Sleep(500 * time.Millisecond)
-		openBrowser(url)
+		OpenBrowser(url)
 	}()
 
 	return http.ListenAndServe(addr, nil)
