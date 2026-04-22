@@ -166,9 +166,18 @@ func DaemonRun(cfg *Config) {
 			log.Printf("client init: %v", err)
 		} else {
 			c.OnAddr = func(id, publicAddr string) {
-				cfg.SetPublicAddr(id, publicAddr)
-				if err := SaveConfig(cfg); err != nil {
-					log.Printf("save config: %v", err)
+				changed := false
+				for i := range cfg.Forwards {
+					if cfg.Forwards[i].ID == id && cfg.Forwards[i].PublicAddr != publicAddr {
+						cfg.Forwards[i].PublicAddr = publicAddr
+						changed = true
+						break
+					}
+				}
+				if changed {
+					if err := SaveConfig(cfg); err != nil {
+						log.Printf("save config: %v", err)
+					}
 				}
 			}
 			done := make(chan struct{})
@@ -183,6 +192,8 @@ func DaemonRun(cfg *Config) {
 			case <-done:
 			case <-reload:
 				c.Close()
+				// Small delay to ensure Web UI has finished saving config.json
+				time.Sleep(100 * time.Millisecond)
 				log.Printf("Config reloaded — reconnecting...")
 				attempt = 0
 				continue
