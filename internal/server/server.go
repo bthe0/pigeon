@@ -23,7 +23,14 @@ import (
 	"github.com/bthe0/pigeon/internal/proto"
 	"github.com/hashicorp/yamux"
 	"golang.org/x/crypto/acme/autocert"
+	"embed"
+	"html/template"
 )
+
+//go:embed templates/*.html
+var templatesFS embed.FS
+
+var templates = template.Must(template.ParseFS(templatesFS, "templates/*.html"))
 
 // Config holds server configuration.
 type Config struct {
@@ -651,15 +658,20 @@ func writeStatusPage(w http.ResponseWriter, status int, variant, title, message 
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	title = htmlEscape(title)
-	message = htmlEscape(message)
-	switch pageVariant(variant) {
-	case "terminal":
-		fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s</title><style>body{margin:0;background:#08110c;color:#7CFFB2;font:16px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;display:grid;place-items:center;min-height:100vh}main{max-width:720px;padding:32px;border:1px solid #184c2c;background:#0d1711;box-shadow:0 0 0 1px #0f2a19 inset}h1{margin:0 0 8px;font-size:28px}p{margin:0;color:#b7ffd2}.code{margin-top:18px;color:#62d891}</style></head><body><main><h1>%s</h1><p>%s</p><div class="code">status=%d</div></main></body></html>`, title, title, message, status)
-	case "minimal":
-		fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s</title><style>body{margin:0;font:16px/1.5 Inter,system-ui,sans-serif;background:#f7f7f7;color:#111;display:grid;place-items:center;min-height:100vh}main{max-width:560px;background:#fff;border:1px solid #e5e5e5;padding:32px}h1{margin:0 0 8px;font-size:26px}p{margin:0;color:#666}</style></head><body><main><h1>%s</h1><p>%s</p></main></body></html>`, title, title, message)
-	default:
-		fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s</title><style>:root{--bg:#0b0d0c;--panel:#111412;--border:#222522;--text:#d8ddd9;--text-dim:#9ba39c;--accent:#00e87a}body{margin:0;background:radial-gradient(circle at top,#162119,#0b0d0c 60%%);color:var(--text);font:16px/1.5 Inter,system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;padding:24px}main{width:min(620px,100%%);background:rgba(17,20,18,.96);border:1px solid var(--border);padding:32px;border-radius:18px;box-shadow:0 12px 40px rgba(0,0,0,.25)}.eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin-bottom:12px}.status{font:600 13px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text-dim);margin-top:16px}h1{margin:0 0 10px;font-size:30px}.msg{margin:0;color:var(--text-dim)}</style></head><body><main><div class="eyebrow">Pigeon Tunnel</div><h1>%s</h1><p class="msg">%s</p><div class="status">HTTP %d</div></main></body></html>`, title, title, message, status)
+
+	tplName := "status_" + pageVariant(variant) + ".html"
+	data := struct {
+		Title   string
+		Message string
+		Status  int
+	}{
+		Title:   title,
+		Message: message,
+		Status:  status,
+	}
+
+	if err := templates.ExecuteTemplate(w, tplName, data); err != nil {
+		log.Printf("template error: %v", err)
 	}
 }
 
@@ -667,36 +679,25 @@ func writePasswordPage(w http.ResponseWriter, variant, title, message, errMsg st
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusUnauthorized)
-	title = htmlEscape(title)
-	message = htmlEscape(message)
-	errMsg = htmlEscape(errMsg)
-	switch pageVariant(variant) {
-	case "terminal":
-		fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s</title><style>body{margin:0;background:#08110c;color:#7CFFB2;font:16px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;display:grid;place-items:center;min-height:100vh}main{max-width:720px;padding:32px;border:1px solid #184c2c;background:#0d1711;box-shadow:0 0 0 1px #0f2a19 inset}h1{margin:0 0 8px;font-size:28px}p{margin:0 0 18px;color:#b7ffd2}.err{margin:0 0 14px;color:#ff8e8e}input,button{font:inherit;border:1px solid #2a6d45;background:#0a120d;color:#7CFFB2;padding:10px 12px}button{cursor:pointer}.row{display:flex;gap:8px;flex-wrap:wrap}</style></head><body><main><h1>%s</h1><p>%s</p>%s<form method="post"><div class="row"><input autofocus type="password" name="pigeon_password" placeholder="Password" /><button type="submit">Unlock</button></div></form></main></body></html>`, title, title, message, renderInlineError("err", errMsg))
-	case "minimal":
-		fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s</title><style>body{margin:0;font:16px/1.5 Inter,system-ui,sans-serif;background:#f7f7f7;color:#111;display:grid;place-items:center;min-height:100vh}main{max-width:560px;background:#fff;border:1px solid #e5e5e5;padding:32px}h1{margin:0 0 8px;font-size:26px}p{margin:0 0 18px;color:#666}.err{margin:0 0 14px;color:#c62828}input,button{font:inherit;padding:10px 12px;border:1px solid #d5d5d5}.row{display:flex;gap:8px;flex-wrap:wrap}button{cursor:pointer;background:#111;color:#fff}</style></head><body><main><h1>%s</h1><p>%s</p>%s<form method="post"><div class="row"><input autofocus type="password" name="pigeon_password" placeholder="Password" /><button type="submit">Unlock</button></div></form></main></body></html>`, title, title, message, renderInlineError("err", errMsg))
-	default:
-		fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s</title><style>:root{--bg:#0b0d0c;--panel:#111412;--border:#222522;--text:#d8ddd9;--text-dim:#9ba39c;--accent:#00e87a;--red:#ff5d5d}body{margin:0;background:radial-gradient(circle at top,#162119,#0b0d0c 60%%);color:var(--text);font:16px/1.5 Inter,system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;padding:24px}main{width:min(620px,100%%);background:rgba(17,20,18,.96);border:1px solid var(--border);padding:32px;border-radius:18px;box-shadow:0 12px 40px rgba(0,0,0,.25)}.eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin-bottom:12px}h1{margin:0 0 10px;font-size:30px}.msg{margin:0 0 18px;color:var(--text-dim)}.err{margin:0 0 14px;color:var(--red)}.row{display:flex;gap:8px;flex-wrap:wrap}input,button{font:inherit;padding:11px 12px;border-radius:10px}input{min-width:220px;background:var(--panel);border:1px solid var(--border);color:var(--text)}button{border:none;background:var(--accent);color:#000;font-weight:700;cursor:pointer}</style></head><body><main><div class="eyebrow">Protected Tunnel</div><h1>%s</h1><p class="msg">%s</p>%s<form method="post"><div class="row"><input autofocus type="password" name="pigeon_password" placeholder="Password" /><button type="submit">Unlock</button></div></form></main></body></html>`, title, title, message, renderInlineError("err", errMsg))
+
+	tplName := "password_" + pageVariant(variant) + ".html"
+	data := struct {
+		Title   string
+		Message string
+		Error   string
+	}{
+		Title:   title,
+		Message: message,
+		Error:   errMsg,
+	}
+
+	if err := templates.ExecuteTemplate(w, tplName, data); err != nil {
+		log.Printf("template error: %v", err)
 	}
 }
 
-func renderInlineError(className, errMsg string) string {
-	if errMsg == "" {
-		return ""
-	}
-	return fmt.Sprintf(`<div class="%s">%s</div>`, className, errMsg)
-}
 
-func htmlEscape(s string) string {
-	replacer := strings.NewReplacer(
-		"&", "&amp;",
-		"<", "&lt;",
-		">", "&gt;",
-		`"`, "&quot;",
-		"'", "&#39;",
-	)
-	return replacer.Replace(s)
-}
+// ── Logging ────────────────────────────────────────────────────────────────────
 
 // ── Logging ────────────────────────────────────────────────────────────────────
 
