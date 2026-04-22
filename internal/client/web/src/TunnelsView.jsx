@@ -17,7 +17,7 @@ function SkeletonRow() {
   );
 }
 
-export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomain }) {
+export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomain, dashFetch }) {
   const emptyForm = { localAddr: '', domain: '', port: '', proto: 'http', disabled: false, expose: 'both', httpPassword: '', maxConnections: '', unavailablePage: 'default' };
   const localAddrRef = useRef(null);
   const [newOpen, setNewOpen] = useState(false);
@@ -63,7 +63,7 @@ export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, ba
   async function confirmDelete() {
     if (!deleteId) return;
     try {
-      const res = await fetch(`/api/forwards/${deleteId}`, { method: 'DELETE' });
+      const res = await dashFetch(`/api/forwards/${deleteId}`, { method: 'DELETE' });
       if(!res.ok) throw new Error(await res.text());
       await new Promise(r => setTimeout(r, 150));
       await reloadConfig();
@@ -162,7 +162,7 @@ export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, ba
         unavailable_page: form.unavailablePage || 'default'
       };
       const url = editId ? `/api/forwards/${editId}` : `/api/forwards`;
-      const res = await fetch(url, {
+      const res = await dashFetch(url, {
         method: editId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -194,7 +194,7 @@ export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, ba
         max_connections: t.maxConnections || 0,
         unavailable_page: t.unavailablePage || 'default'
       };
-      const res = await fetch(`/api/forwards/${t.id}`, {
+      const res = await dashFetch(`/api/forwards/${t.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -222,7 +222,7 @@ export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, ba
         max_connections: t.maxConnections || 0,
         unavailable_page: t.unavailablePage || 'default'
       };
-      const res = await fetch(`/api/forwards/${t.id}`, {
+      const res = await dashFetch(`/api/forwards/${t.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)

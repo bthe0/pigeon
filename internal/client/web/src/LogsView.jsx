@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-export function LogsView() {
+export function LogsView({ dashFetch }) {
   const [logs, setLogs] = useState([]);
   const [live, setLive] = useState(true);
   const [levelFilter, setLevelFilter] = useState('ALL');
@@ -23,7 +23,7 @@ export function LogsView() {
     if (!live) return;
     const fetchLogs = async () => {
       try {
-        const res = await fetch('/api/logs');
+        const res = await dashFetch('/api/logs');
         if (res.ok) {
           const raw = await res.json() || [];
           const formatted = raw.map(r => {

@@ -112,11 +112,19 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			}
 		}
 
-		type configResponse struct {
-			*Config
-			Version string `json:"version"`
+		// Flatten the response so the frontend finds fields at the top level
+		resp := map[string]interface{}{
+			"server":      cfg.Server,
+			"token":       cfg.Token,
+			"local_dev":    cfg.LocalDev,
+			"base_domain": cfg.BaseDomain,
+			"web_addr":    cfg.WebAddr,
+			"forwards":    cfg.Forwards,
+			"version":     AgentVersion,
 		}
-		json.NewEncoder(w).Encode(configResponse{Config: cfg, Version: AgentVersion})
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
 	})))
 
 	mux.HandleFunc("/api/logs", auth(noCache(func(w http.ResponseWriter, r *http.Request) {

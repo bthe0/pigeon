@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-export function SettingsView({ config, loading }) {
+export function SettingsView({ config, loading, dashFetch }) {
   const [authToken, setAuthToken] = useState(config?.token || '');
   const [server, setServer] = useState(config?.server || '');
   const [showToken, setShowToken] = useState(false);
@@ -13,7 +13,7 @@ export function SettingsView({ config, loading }) {
     setConfirmRestart(false);
     setRestarting(true);
     try {
-      const res = await fetch('/api/restart', { method: 'POST' });
+      const res = await dashFetch('/api/restart', { method: 'POST' });
       if(!res.ok) throw new Error(await res.text());
     } catch(err) {
       alert("Failed to restart daemon: " + err.message);

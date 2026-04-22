@@ -25,6 +25,13 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
+const DASH_TOKEN = new URLSearchParams(window.location.search).get('token');
+const dashFetch = (url, opts = {}) => {
+  const finalUrl = new URL(url, window.location.origin);
+  if (DASH_TOKEN) finalUrl.searchParams.set('token', DASH_TOKEN);
+  return fetch(finalUrl.toString(), opts);
+};
+
 function WorldMap({ nodes, onHover, hoveredCity, W=420, H=210 }) {
   return (
     <div style={{ position:'relative', width:'100%', aspectRatio:`${W} / ${H}`, overflow:'hidden', border:'1px solid var(--border)', background:'linear-gradient(180deg, rgba(18,23,20,0.98), rgba(11,15,13,1))' }}>
@@ -67,7 +74,7 @@ function agoFromTime(timeString) {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
-function TunnelDetail({ tunnel, onClose }) {
+function TunnelDetail({ tunnel, onClose, dashFetch }) {
   const [tab, setTab] = useState('details');
   const [hoveredCity, setHoveredCity] = useState(null);
   const [tooltip, setTooltip] = useState(null);
@@ -76,9 +83,9 @@ function TunnelDetail({ tunnel, onClose }) {
   useEffect(() => {
     if (!tunnel || tab !== 'visitors') return;
     const filter = tunnel.publicUrl || tunnel.id;
-    const fetchVisitors = async () => {
+    const dashFetchVisitors = async () => {
       try {
-        const res = await fetch(`/api/inspector?filter=${encodeURIComponent(filter)}`);
+        const res = await dashFetch(`/api/inspector?filter=${encodeURIComponent(filter)}`);
         if (!res.ok) throw new Error(await res.text());
         const raw = await res.json() || [];
         const mapped = [...raw].reverse().map((entry, index) => ({
@@ -101,8 +108,8 @@ function TunnelDetail({ tunnel, onClose }) {
         setVisitors([]);
       }
     };
-    fetchVisitors();
-    const iv = setInterval(fetchVisitors, 1500);
+    dashFetchVisitors();
+    const iv = setInterval(dashFetchVisitors, 1500);
     return () => clearInterval(iv);
   }, [tunnel, tab]);
 
@@ -293,7 +300,7 @@ export function App() {
 
   const loadConfig = async () => {
     try {
-      const res = await fetch('/api/config');
+      const res = await dashFetch('/api/config');
       if(!res.ok) {
         const txt = await res.text();
         if(txt.includes('not initialised')) setInitError(txt);
@@ -375,11 +382,11 @@ export function App() {
       <div className="app-layout" style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
         <Sidebar active={activeNav} setActive={v => { window.location.hash = v; setSelectedTunnel(null); }} />
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
-          {activeNav === 'tunnels' && <TunnelsView tunnels={tunnels} loading={loading} reloadConfig={loadConfig} onSelectTunnel={t => setSelectedTunnel(t)} baseDomain={rawConfig?.base_domain || ''} />}
-          {activeNav === 'inspector' && <InspectorView tunnels={tunnels} />}
-          {activeNav === 'logs' && <LogsView />}
-          {activeNav === 'settings' && <SettingsView config={rawConfig} loading={loading} />}
-          {selectedTunnel && activeNav === 'tunnels' && <TunnelDetail tunnel={selectedTunnel} onClose={() => setSelectedTunnel(null)} />}
+          {activeNav === 'tunnels' && <TunnelsView tunnels={tunnels} loading={loading} reloadConfig={loadConfig} onSelectTunnel={t => setSelectedTunnel(t)} baseDomain={rawConfig?.base_domain || ''} dashFetch={dashFetch} />}
+          {activeNav === 'inspector' && <InspectorView tunnels={tunnels} dashFetch={dashFetch} />}
+          {activeNav === 'logs' && <LogsView dashFetch={dashFetch} />}
+          {activeNav === 'settings' && <SettingsView config={rawConfig} loading={loading} dashFetch={dashFetch} />}
+          {selectedTunnel && activeNav === 'tunnels' && <TunnelDetail tunnel={selectedTunnel} onClose={() => setSelectedTunnel(null)} dashFetch={dashFetch} />}
         </div>
       </div>
     </div>

@@ -5,7 +5,7 @@ import { statusColor } from './Constants';
 
 const METHOD_COLORS = { GET:'#4d9fff', POST:'#00e87a', PUT:'#f5c542', DELETE:'#ff4d4d', PATCH:'#c084fc', OPTIONS:'#6b7068', HEAD:'#9ba39c' };
 
-export function InspectorView({ tunnels }) {
+export function InspectorView({ tunnels, dashFetch }) {
   const [selected, setSelected] = useState(null);
   const [requests, setRequests] = useState([]);
   const [filterTunnel, setFilterTunnel] = useState('all');
@@ -17,7 +17,7 @@ export function InspectorView({ tunnels }) {
     const fetchInspector = async () => {
       try {
         const qs = filterTunnel === 'all' ? '' : `?filter=${encodeURIComponent(filterTunnel)}`;
-        const res = await fetch(`/api/inspector${qs}`);
+        const res = await dashFetch(`/api/inspector${qs}`);
         if (!res.ok) throw new Error(await res.text());
         const raw = await res.json() || [];
         const rows = [...raw].reverse().map(r => {
