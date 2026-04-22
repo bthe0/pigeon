@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 )
 
 type MessageType string
@@ -107,10 +108,10 @@ func Write(w io.Writer, msg Message) error {
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
-	buf := make([]byte, 4+len(data))
-	binary.BigEndian.PutUint32(buf[:4], uint32(len(data)))
-	copy(buf[4:], data)
-	_, err = w.Write(buf)
+	var lenBuf [4]byte
+	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(data)))
+	bufs := net.Buffers{lenBuf[:], data}
+	_, err = bufs.WriteTo(w)
 	return err
 }
 
@@ -150,10 +151,10 @@ func WriteStreamHeader(w io.Writer, h StreamHeader) error {
 	if err != nil {
 		return err
 	}
-	buf := make([]byte, 4+len(data))
-	binary.BigEndian.PutUint32(buf[:4], uint32(len(data)))
-	copy(buf[4:], data)
-	_, err = w.Write(buf)
+	var lenBuf [4]byte
+	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(data)))
+	bufs := net.Buffers{lenBuf[:], data}
+	_, err = bufs.WriteTo(w)
 	return err
 }
 
