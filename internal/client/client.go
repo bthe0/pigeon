@@ -330,6 +330,7 @@ func (c *Client) sendForwardAdd(rule ForwardRule) error {
 		(rule.Protocol == proto.ProtoHTTP || rule.Protocol == proto.ProtoHTTPS) {
 		domain = rule.PublicAddr
 	}
+	log.Printf("[DEBUG] Registering Forward: %s | Protocol: %s | Expose: %s", rule.ID, rule.Protocol, rule.Expose)
 	return proto.Write(c.ctrl, proto.Message{
 		Type: proto.MsgForwardAdd,
 		Payload: proto.ForwardPayload{
