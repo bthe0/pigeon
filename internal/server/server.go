@@ -159,7 +159,10 @@ func (s *Server) handleClient(conn net.Conn) {
 
 	clientID := randomID(8)
 	sess := &session{id: clientID, mux: mux, ctrl: ctrl, forwards: make(map[string]*forward)}
-	sess.writeMessage(proto.Message{Type: proto.MsgAuthAck, Payload: proto.AuthAckPayload{ClientID: clientID}})
+	sess.writeMessage(proto.Message{Type: proto.MsgAuthAck, Payload: proto.AuthAckPayload{
+		ClientID:   clientID,
+		BaseDomain: s.cfg.Domain,
+	}})
 	log.Printf("[%s] client connected from %s", clientID, conn.RemoteAddr())
 
 	defer func() {

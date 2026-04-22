@@ -41,7 +41,8 @@ type AuthPayload struct {
 }
 
 type AuthAckPayload struct {
-	ClientID string `json:"client_id"`
+	ClientID   string `json:"client_id"`
+	BaseDomain string `json:"base_domain,omitempty"`
 }
 
 type ForwardPayload struct {

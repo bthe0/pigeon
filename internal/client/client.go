@@ -91,6 +91,12 @@ func (c *Client) Connect() error {
 	proto.DecodePayload(msg, &ack)
 	log.Printf("Connected as %s", ack.ClientID)
 
+	// Persist the base domain discovered from the server
+	if ack.BaseDomain != "" && c.cfg.BaseDomain != ack.BaseDomain {
+		c.cfg.BaseDomain = ack.BaseDomain
+		_ = SaveConfig(c.cfg)
+	}
+
 	c.mux = mux
 	c.ctrl = ctrl
 
