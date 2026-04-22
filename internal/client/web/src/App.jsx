@@ -304,7 +304,7 @@ export function App() {
         if (f.protocol === 'http' || f.protocol === 'https') {
           let raw = f.public_addr || f.domain || (baseDomain ? `${f.id}.${baseDomain}` : null);
           // if the stored value has no dot (e.g. a short label without base domain), append it
-          if (raw && baseDomain && !raw.includes('.')) raw = `${raw}.${baseDomain}`;
+          if (raw && baseDomain && !raw.endsWith('.' + baseDomain) && raw !== baseDomain) raw = `${raw}.${baseDomain}`;
           pubUrl = raw;
           urlScheme = expose === 'http' ? 'http' : 'https';
         } else {

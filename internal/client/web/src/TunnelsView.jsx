@@ -313,7 +313,7 @@ export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, ba
                 <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border2)', background: 'var(--panel2)' }}>
                   <input value={form.domain} onChange={e => { const value = e.target.value; setForm(x => ({...x, domain: value})); setFormErrors(x => ({ ...x, domain: undefined })); }} placeholder={baseDomain ? 'myapp' : 'myapp.tunnel.dev'} disabled={isAdding}
                     style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }} />
-                  {baseDomain && !form.domain.includes('.') && (
+                  {baseDomain && !form.domain.endsWith('.' + baseDomain) && !form.domain.endsWith(baseDomain) && (
                     <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--text-dim)', padding: '8px 10px 8px 0', whiteSpace: 'nowrap' }}>.{baseDomain}</span>
                   )}
                 </div>
