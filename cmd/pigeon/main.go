@@ -607,6 +607,14 @@ WantedBy=multi-user.target
 					webAddr = ":" + webAddr
 				}
 
+				fmt.Print("Enter a Dashboard Login Password (min 4 chars): ")
+				dashPass, _ := reader.ReadString('\n')
+				dashPass = strings.TrimSpace(dashPass)
+				if len(dashPass) < 4 {
+					dashPass = proto.RandomID(12)
+					fmt.Printf("⚠️ Password too short. Using auto-generated password: %s\n", dashPass)
+				}
+
 				// Check if port is available
 				ln, err := net.Listen("tcp", webAddr)
 				if err != nil {
@@ -623,7 +631,7 @@ WantedBy=multi-user.target
 				}
 				fmt.Println("✅ Connection successful!")
 
-				cfg := &client.Config{Server: serverAddr, Token: token, WebAddr: webAddr}
+				cfg := &client.Config{Server: serverAddr, Token: token, WebAddr: webAddr, DashboardPassword: dashPass}
 				if err := client.SaveConfig(cfg); err != nil {
 					fmt.Printf("Error saving config: %v\n", err)
 				} else {

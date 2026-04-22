@@ -32,7 +32,8 @@ type Config struct {
 	LocalDev   bool          `json:"local_dev"`            // true when running in local dev mode (self-signed TLS)
 	BaseDomain string        `json:"base_domain,omitempty"` // base domain for auto-assigned tunnel URLs
 	WebAddr    string        `json:"web_addr,omitempty"`    // address to run web interface on (default :8080)
-	Forwards   []ForwardRule `json:"forwards"`
+	DashboardPassword string     `json:"dashboard_password,omitempty"`
+	Forwards          []ForwardRule `json:"forwards"`
 }
 
 func configDir() (string, error) {

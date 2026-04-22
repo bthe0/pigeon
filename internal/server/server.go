@@ -601,9 +601,6 @@ func (s *Server) authorizeTunnelPassword(w http.ResponseWriter, r *http.Request,
 	if _, pass, ok := r.BasicAuth(); ok && pass == fwd.httpPassword {
 		return true
 	}
-	if _, pass, ok := r.BasicAuth(); ok && pass == fwd.httpPassword {
-		return true
-	}
 	if cookie, err := r.Cookie(passwordCookieName(fwd)); err == nil && cookie.Value == passwordCookieValue(s.cfg.Token, fwd) {
 		return true
 	}

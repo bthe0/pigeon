@@ -135,7 +135,12 @@ func DaemonRun(cfg *Config) {
 		if addr == "" {
 			addr = "127.0.0.1:8080"
 		}
+		url := "http://" + addr
+		if cfg.Token != "" {
+			url += "?token=" + cfg.Token
+		}
 		log.Printf("Web interface starting on %s", addr)
+		log.Printf("Access the dashboard at: %s", url)
 		if err := StartWebInterface(addr, false); err != nil {
 			log.Printf("Web interface failed: %v", err)
 		}

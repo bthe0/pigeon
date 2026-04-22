@@ -2,6 +2,8 @@ package client
 
 import (
 	"encoding/json"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -14,13 +16,10 @@ import (
 
 	"embed"
 
-	"github.com/bthe0/pigeon/internal/proto"
 )
 
 //go:embed web/dist/*
 var webFS embed.FS
-
-
 
 // AgentVersion is set at build time or by main before starting the web interface.
 var AgentVersion = "dev"
@@ -42,11 +41,15 @@ func OpenBrowser(url string) {
 	}
 }
 
+func sessionValue(password string) string {
+	sum := sha256.Sum256([]byte(password))
+	return hex.EncodeToString(sum[:])
+}
+
 func StartWebInterface(addr string, openBrowser bool) error {
 	mux := http.NewServeMux()
 	var handler http.Handler
 
-	// Try serving from local filesystem first (useful for dev)
 	localDist := filepath.Join("internal", "client", "web", "dist")
 	if _, err := os.Stat(localDist); err == nil {
 		fmt.Printf("Serving web interface from local folder: %s\n", localDist)
@@ -66,11 +69,17 @@ func StartWebInterface(addr string, openBrowser bool) error {
 		return func(w http.ResponseWriter, r *http.Request) {
 			cfg, err := LoadConfig()
 			if err != nil {
-				h(w, r) // Fallback if no config yet (setup phase)
+				h(w, r)
 				return
 			}
 			
-			// Simple token check
+			if cookie, err := r.Cookie("pigeon_session"); err == nil {
+				if cookie.Value == sessionValue(cfg.DashboardPassword) {
+					h(w, r)
+					return
+				}
+			}
+
 			token := r.Header.Get("Authorization")
 			if token == "" {
 				token = r.URL.Query().Get("token")
@@ -78,12 +87,12 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			if strings.HasPrefix(token, "Bearer ") {
 				token = strings.TrimPrefix(token, "Bearer ")
 			}
-			
-			if token != cfg.Token {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+			if token != "" && token == cfg.Token {
+				h(w, r)
 				return
 			}
-			h(w, r)
+
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 		}
 	}
 
@@ -101,7 +110,6 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			return
 		}
 
-		// Inject real metrics from logs
 		metrics, _ := GetMetrics()
 		if metrics != nil {
 			for i := range cfg.Forwards {
@@ -112,10 +120,8 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			}
 		}
 
-		// Flatten the response so the frontend finds fields at the top level
 		resp := map[string]interface{}{
 			"server":      cfg.Server,
-			"token":       cfg.Token,
 			"local_dev":    cfg.LocalDev,
 			"base_domain": cfg.BaseDomain,
 			"web_addr":    cfg.WebAddr,
@@ -126,6 +132,40 @@ func StartWebInterface(addr string, openBrowser bool) error {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	})))
+
+	mux.HandleFunc("/api/login", noCache(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var p struct {
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		cfg, err := LoadConfig()
+		if err != nil {
+			http.Error(w, "not initialised", http.StatusInternalServerError)
+			return
+		}
+		if p.Password == "" || p.Password != cfg.DashboardPassword {
+			http.Error(w, "invalid password", http.StatusUnauthorized)
+			return
+		}
+
+		http.SetCookie(w, &http.Cookie{
+			Name:     "pigeon_session",
+			Value:    sessionValue(cfg.DashboardPassword),
+			Path:     "/",
+			HttpOnly: true,
+			MaxAge:   86400 * 30, // 30 days
+			SameSite: http.SameSiteLaxMode,
+		})
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
 
 	mux.HandleFunc("/api/logs", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
 		filter := r.URL.Query().Get("filter")
@@ -149,67 +189,31 @@ func StartWebInterface(addr string, openBrowser bool) error {
 		json.NewEncoder(w).Encode(entries)
 	})))
 
-	mux.HandleFunc("/api/forwards", auth(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	mux.HandleFunc("/api/forwards", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			var rule ForwardRule
+			if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			cfg, _ := LoadConfig()
+			if err := cfg.AddForward(rule); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			if err := SaveConfig(cfg); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			DaemonReload()
+			w.WriteHeader(http.StatusCreated)
 			return
 		}
-		var req struct {
-			Protocol       proto.Protocol `json:"protocol"`
-			LocalAddr      string         `json:"local_addr"`
-			Domain         string         `json:"domain"`
-			RemotePort     int            `json:"remote_port"`
-			Expose         string         `json:"expose"`
-			HTTPPassword   string         `json:"http_password"`
-			MaxConnections int            `json:"max_connections"`
-			UnavailablePage string         `json:"unavailable_page"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+	})))
 
-		cfg, err := LoadConfig()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		rule := ForwardRule{
-			ID:              proto.RandomID(8),
-			Protocol:        req.Protocol,
-			LocalAddr:       req.LocalAddr,
-			Domain:          req.Domain,
-			RemotePort:      req.RemotePort,
-			Expose:          req.Expose,
-			HTTPPassword:    req.HTTPPassword,
-			MaxConnections:  req.MaxConnections,
-			UnavailablePage: req.UnavailablePage,
-		}
-		if err := cfg.AddForward(rule); err != nil {
-			http.Error(w, string(err.Error()), http.StatusBadRequest)
-			return
-		}
-		if err := SaveConfig(cfg); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		DaemonReload()
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	mux.HandleFunc("/api/forwards/", auth(func(w http.ResponseWriter, r *http.Request) {
-		id := r.URL.Path[len("/api/forwards/"):]
-		if id == "" {
-			http.Error(w, "missing id", http.StatusBadRequest)
-			return
-		}
-
-		cfg, err := LoadConfig()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+	mux.HandleFunc("/api/forwards/", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/forwards/")
+		cfg, _ := LoadConfig()
 
 		if r.Method == "DELETE" {
 			if !cfg.RemoveForward(id) {
@@ -231,8 +235,6 @@ func StartWebInterface(addr string, openBrowser bool) error {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			rule.ID = id
-			// preserve server-assigned public address across edits
 			for _, f := range cfg.Forwards {
 				if f.ID == id {
 					rule.PublicAddr = f.PublicAddr
@@ -275,7 +277,7 @@ func StartWebInterface(addr string, openBrowser bool) error {
 				}
 			}
 			if !found {
-				http.Error(w, "tunnel not found", http.StatusNotFound)
+				http.Error(w, "not found", http.StatusNotFound)
 				return
 			}
 			if err := SaveConfig(cfg); err != nil {
@@ -286,11 +288,9 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
+	})))
 
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}))
-
-	mux.HandleFunc("/api/restart", auth(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/restart", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -302,20 +302,15 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-	}))
+	})))
 
-	url := fmt.Sprintf("http://%s", addr)
-	if cfg, err := LoadConfig(); err == nil && cfg.Token != "" {
-		url += "?token=" + cfg.Token
-	}
-	fmt.Printf("Web interface running on %s\n", url)
+	fmt.Printf("Web interface running on http://%s\n", addr)
 	if openBrowser {
 		go func() {
 			time.Sleep(500 * time.Millisecond)
-			OpenBrowser(url)
+			OpenBrowser("http://" + addr)
 		}()
 	}
 
 	return http.ListenAndServe(addr, mux)
 }
-
