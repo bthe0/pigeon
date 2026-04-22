@@ -132,3 +132,97 @@ func TestTailLogs_MalformedLines(t *testing.T) {
 		t.Fatalf("TailLogs malformed: %v", err)
 	}
 }
+
+// ── FetchRecentLogs ────────────────────────────────────────────────────────────
+
+func TestFetchRecentLogs_EmptyDir(t *testing.T) {
+	pigeonHome(t)
+	_, err := client.FetchRecentLogs("", 0)
+	if err != nil {
+		t.Fatalf("FetchRecentLogs on empty dir: %v", err)
+	}
+}
+
+func TestFetchRecentLogs_ReturnsEntries(t *testing.T) {
+	logDir := pigeonHome(t)
+	now := time.Now()
+	writeNDJSON(t, logDir, []proto.TrafficLogEntry{
+		{Time: now.Format(time.RFC3339), ForwardID: "f1", Protocol: "HTTP", Action: "GET /"},
+		{Time: now.Format(time.RFC3339), ForwardID: "f2", Protocol: "TCP", Action: "CONNECT"},
+	})
+
+	entries, err := client.FetchRecentLogs("", 0)
+	if err != nil {
+		t.Fatalf("FetchRecentLogs: %v", err)
+	}
+	found := 0
+	for _, e := range entries {
+		if e.ForwardID == "f1" || e.ForwardID == "f2" {
+			found++
+		}
+	}
+	if found != 2 {
+		t.Errorf("expected 2 matching entries, got %d (total %d)", found, len(entries))
+	}
+}
+
+func TestFetchRecentLogs_FilterByForwardID(t *testing.T) {
+	logDir := pigeonHome(t)
+	now := time.Now()
+	writeNDJSON(t, logDir, []proto.TrafficLogEntry{
+		{Time: now.Format(time.RFC3339), ForwardID: "wanted", Protocol: "HTTP", Action: "GET /"},
+		{Time: now.Format(time.RFC3339), ForwardID: "other", Protocol: "TCP", Action: "CONNECT"},
+	})
+
+	entries, err := client.FetchRecentLogs("wanted", 0)
+	if err != nil {
+		t.Fatalf("FetchRecentLogs filter: %v", err)
+	}
+	for _, e := range entries {
+		if e.Protocol != "DAEMON" && e.ForwardID != "wanted" {
+			t.Errorf("unexpected forward ID %q in filtered results", e.ForwardID)
+		}
+	}
+}
+
+func TestFetchRecentLogs_LimitApplied(t *testing.T) {
+	logDir := pigeonHome(t)
+	now := time.Now()
+	var bulk []proto.TrafficLogEntry
+	for i := 0; i < 20; i++ {
+		bulk = append(bulk, proto.TrafficLogEntry{
+			Time: now.Format(time.RFC3339), ForwardID: "f1", Protocol: "HTTP", Action: "GET /",
+		})
+	}
+	writeNDJSON(t, logDir, bulk)
+
+	entries, err := client.FetchRecentLogs("", 5)
+	if err != nil {
+		t.Fatalf("FetchRecentLogs limit: %v", err)
+	}
+	if len(entries) > 5 {
+		t.Errorf("expected at most 5 entries, got %d", len(entries))
+	}
+}
+
+// ── UpdateMetrics / GetMetrics ─────────────────────────────────────────────────
+
+func TestUpdateMetrics_Basic(t *testing.T) {
+	client.UpdateMetrics("metrics-test-fwd", 100)
+	client.UpdateMetrics("metrics-test-fwd", 200)
+
+	m, err := client.GetMetrics()
+	if err != nil {
+		t.Fatalf("GetMetrics: %v", err)
+	}
+	got, ok := m["metrics-test-fwd"]
+	if !ok {
+		t.Fatal("expected metrics entry for 'metrics-test-fwd'")
+	}
+	if got.Requests < 2 {
+		t.Errorf("Requests = %d, want >= 2", got.Requests)
+	}
+	if got.Bytes < 300 {
+		t.Errorf("Bytes = %d, want >= 300", got.Bytes)
+	}
+}

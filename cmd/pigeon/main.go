@@ -560,30 +560,41 @@ func setupCmd() *cobra.Command {
 					if err != nil {
 						fmt.Println("❌ Could not determine executable path.")
 					} else {
-						svcContent := fmt.Sprintf(`[Unit]
+						// Write token to a separate env file with restricted permissions.
+					envContent := fmt.Sprintf("PIGEON_TOKEN=%s\n", token)
+					envFile := "/etc/pigeon/token.env"
+					if mkErr := os.MkdirAll("/etc/pigeon", 0700); mkErr != nil {
+						fmt.Printf("❌ Failed to create /etc/pigeon: %v\n", mkErr)
+					} else if envErr := os.WriteFile(envFile, []byte(envContent), 0600); envErr != nil {
+						fmt.Printf("❌ Failed to write token env file: %v\n", envErr)
+					}
+
+					svcContent := fmt.Sprintf(`[Unit]
 Description=Pigeon Tunnel Server
 After=network.target
 
 [Service]
-ExecStart=%s server --domain %s --token %s --http :8080 --control :2222
+EnvironmentFile=/etc/pigeon/token.env
+ExecStart=%s server --domain %s --token ${PIGEON_TOKEN} --http :8080 --control :2222
 Restart=always
 User=root
 
 [Install]
 WantedBy=multi-user.target
-`, execPath, domain, token)
-						err = os.WriteFile("/etc/systemd/system/pigeon-server.service", []byte(svcContent), 0644)
-						if err != nil {
-							fmt.Printf("❌ Failed to write service file (try running setup as root / sudo): %v\n", err)
+`, execPath, domain)
+					err = os.WriteFile("/etc/systemd/system/pigeon-server.service", []byte(svcContent), 0644)
+					if err != nil {
+						fmt.Printf("❌ Failed to write service file (try running setup as root / sudo): %v\n", err)
+					} else {
+						fmt.Println("✅ Service written to /etc/systemd/system/pigeon-server.service")
+						fmt.Printf("✅ Token stored in %s (readable only by root)\n", envFile)
+						exec.Command("systemctl", "daemon-reload").Run()
+						if err := exec.Command("systemctl", "enable", "--now", "pigeon-server").Run(); err != nil {
+							fmt.Printf("❌ Failed to enable/start service: %v\n", err)
 						} else {
-							fmt.Println("✅ Service written to /etc/systemd/system/pigeon-server.service")
-							exec.Command("systemctl", "daemon-reload").Run()
-							if err := exec.Command("systemctl", "enable", "--now", "pigeon-server").Run(); err != nil {
-								fmt.Printf("❌ Failed to enable/start service: %v\n", err)
-							} else {
-								fmt.Println("✅ Pigeon Server is now running and enabled on boot!")
-							}
+							fmt.Println("✅ Pigeon Server is now running and enabled on boot!")
 						}
+					}
 					}
 				}
 

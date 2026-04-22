@@ -258,6 +258,56 @@ func TestLoadConfig_NotInitialised(t *testing.T) {
 	}
 }
 
+// ── Config.UpdateForward ───────────────────────────────────────────────────────
+
+func TestUpdateForward_Success(t *testing.T) {
+	cfg := &client.Config{
+		Forwards: []client.ForwardRule{
+			{ID: "up1", Protocol: proto.ProtoHTTP, LocalAddr: "localhost:3000", Domain: "old.example.com"},
+		},
+	}
+	updated := client.ForwardRule{ID: "up1", Protocol: proto.ProtoHTTP, LocalAddr: "localhost:4000", Domain: "new.example.com"}
+	if err := cfg.UpdateForward("up1", updated); err != nil {
+		t.Fatalf("UpdateForward: %v", err)
+	}
+	if cfg.Forwards[0].LocalAddr != "localhost:4000" {
+		t.Errorf("LocalAddr: got %q want localhost:4000", cfg.Forwards[0].LocalAddr)
+	}
+	if cfg.Forwards[0].Domain != "new.example.com" {
+		t.Errorf("Domain: got %q want new.example.com", cfg.Forwards[0].Domain)
+	}
+}
+
+func TestUpdateForward_NotFound(t *testing.T) {
+	cfg := &client.Config{
+		Forwards: []client.ForwardRule{
+			{ID: "existing", Protocol: proto.ProtoTCP, LocalAddr: "localhost:5432"},
+		},
+	}
+	err := cfg.UpdateForward("ghost", client.ForwardRule{ID: "ghost"})
+	if err == nil {
+		t.Fatal("expected error for non-existent forward ID, got nil")
+	}
+}
+
+func TestUpdateForward_PreservesLength(t *testing.T) {
+	cfg := &client.Config{
+		Forwards: []client.ForwardRule{
+			{ID: "a", Protocol: proto.ProtoHTTP, LocalAddr: "localhost:3000"},
+			{ID: "b", Protocol: proto.ProtoTCP, LocalAddr: "localhost:5432"},
+		},
+	}
+	if err := cfg.UpdateForward("a", client.ForwardRule{ID: "a", Protocol: proto.ProtoHTTP, LocalAddr: "localhost:8080"}); err != nil {
+		t.Fatalf("UpdateForward: %v", err)
+	}
+	if len(cfg.Forwards) != 2 {
+		t.Errorf("expected 2 forwards after update, got %d", len(cfg.Forwards))
+	}
+	if cfg.Forwards[1].ID != "b" {
+		t.Errorf("second forward should still be 'b', got %q", cfg.Forwards[1].ID)
+	}
+}
+
 func TestSaveConfig_Overwrites(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)

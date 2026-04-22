@@ -86,8 +86,15 @@ type Server struct {
 	forwards      sync.Map // forward id → *forward
 	logger        *log.Logger
 	logFile       io.WriteCloser
-	geoCache      sync.Map // ip -> geoInfo
+	geoCache      sync.Map        // ip -> geoInfo
 	geoPauseUntil atomic.Int64
+	passwordFails sync.Map        // "fwdID:ip" -> *passwordRateEntry
+}
+
+type passwordRateEntry struct {
+	mu        sync.Mutex
+	count     int
+	lockedUntil time.Time
 }
 
 // New creates a new Server.
@@ -96,7 +103,7 @@ func New(cfg Config) *Server {
 
 	var w io.Writer = os.Stdout
 	if cfg.LogFile != "" {
-		f, err := os.OpenFile(cfg.LogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		f, err := os.OpenFile(cfg.LogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err == nil {
 			s.logFile = f
 			w = f
@@ -160,7 +167,7 @@ func (s *Server) handleClient(conn net.Conn) {
 	}
 	var auth proto.AuthPayload
 	if err := proto.DecodePayload(msg, &auth); err != nil || auth.Token != s.cfg.Token {
-		proto.Write(ctrl, proto.Message{Type: proto.MsgError, Payload: proto.ErrorPayload{Message: "invalid token"}})
+		proto.Write(ctrl, proto.Message{Type: proto.MsgError, Payload: proto.ErrorPayload{Message: "authentication failed"}})
 		return
 	}
 
@@ -230,6 +237,8 @@ func (s *Server) registerForward(sess *session, p *proto.ForwardPayload) (string
 		domain := p.Domain
 		if domain == "" {
 			domain = proto.RandomID(8) + "." + s.cfg.Domain
+		} else if s.cfg.Domain != "" && !strings.HasSuffix(domain, "."+s.cfg.Domain) && domain != s.cfg.Domain {
+			return "", fmt.Errorf("domain %q is not a subdomain of %s", domain, s.cfg.Domain)
 		}
 		fwd.publicAddr = domain
 		s.sessions.Store("http:"+domain, fwd)
@@ -605,8 +614,15 @@ func (s *Server) authorizeTunnelPassword(w http.ResponseWriter, r *http.Request,
 		return true
 	}
 
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	rateKey := fwd.id + ":" + ip
+
 	var errorMessage string
 	if r.Method == http.MethodPost {
+		if s.isPasswordRateLimited(rateKey) {
+			writePasswordPage(w, pageVariant(fwd.unavailablePage), "Password required", "This tunnel is protected. Enter the password to continue.", "Too many failed attempts. Try again later.")
+			return false
+		}
 		if err := r.ParseForm(); err == nil {
 			password := r.Form.Get("pigeon_password")
 			switch {
@@ -617,8 +633,10 @@ func (s *Server) authorizeTunnelPassword(w http.ResponseWriter, r *http.Request,
 			case len(password) > 128:
 				errorMessage = "Password must be 128 characters or fewer."
 			case password != fwd.httpPassword:
+				s.recordPasswordFail(rateKey)
 				errorMessage = "Incorrect password."
 			default:
+				s.clearPasswordFails(rateKey)
 				http.SetCookie(w, &http.Cookie{
 					Name:     passwordCookieName(fwd),
 					Value:    passwordCookieValue(s.cfg.Token, fwd),
@@ -636,6 +654,32 @@ func (s *Server) authorizeTunnelPassword(w http.ResponseWriter, r *http.Request,
 
 	writePasswordPage(w, pageVariant(fwd.unavailablePage), "Password required", "This tunnel is protected. Enter the password to continue.", errorMessage)
 	return false
+}
+
+const passwordMaxFails = 10
+const passwordLockDuration = 15 * time.Minute
+
+func (s *Server) isPasswordRateLimited(key string) bool {
+	v, _ := s.passwordFails.LoadOrStore(key, &passwordRateEntry{})
+	e := v.(*passwordRateEntry)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.count >= passwordMaxFails && time.Now().Before(e.lockedUntil)
+}
+
+func (s *Server) recordPasswordFail(key string) {
+	v, _ := s.passwordFails.LoadOrStore(key, &passwordRateEntry{})
+	e := v.(*passwordRateEntry)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.count++
+	if e.count >= passwordMaxFails {
+		e.lockedUntil = time.Now().Add(passwordLockDuration)
+	}
+}
+
+func (s *Server) clearPasswordFails(key string) {
+	s.passwordFails.Delete(key)
 }
 
 func passwordCookieName(fwd *forward) string {

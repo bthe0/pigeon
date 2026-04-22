@@ -134,3 +134,80 @@ func TestMultipleMessages(t *testing.T) {
 		}
 	}
 }
+
+func TestRead_TruncatedPayload(t *testing.T) {
+	var buf bytes.Buffer
+	// Write a 4-byte length header claiming 100 bytes, but provide only 4.
+	buf.Write([]byte{0x00, 0x00, 0x00, 0x64})
+	buf.Write([]byte{1, 2, 3, 4})
+	_, err := proto.Read(&buf)
+	if err == nil {
+		t.Fatal("expected error for truncated payload, got nil")
+	}
+}
+
+func TestReadStreamHeader_TooLarge(t *testing.T) {
+	var buf bytes.Buffer
+	// Claim 128 KB — exceeds the 64 KB limit.
+	buf.Write([]byte{0x00, 0x02, 0x00, 0x00})
+	_, err := proto.ReadStreamHeader(&buf)
+	if err == nil {
+		t.Fatal("expected error for oversized stream header")
+	}
+}
+
+func TestRandomID_Length(t *testing.T) {
+	for _, n := range []int{4, 8, 16, 32} {
+		id := proto.RandomID(n)
+		if len(id) != n {
+			t.Errorf("RandomID(%d) length = %d, want %d", n, len(id), n)
+		}
+	}
+}
+
+func TestRandomID_ValidChars(t *testing.T) {
+	const valid = "abcdefghijklmnopqrstuvwxyz0123456789"
+	validSet := make(map[rune]bool)
+	for _, c := range valid {
+		validSet[c] = true
+	}
+	for i := 0; i < 50; i++ {
+		id := proto.RandomID(16)
+		for _, c := range id {
+			if !validSet[c] {
+				t.Errorf("RandomID contains invalid char %q in %q", c, id)
+			}
+		}
+	}
+}
+
+func TestRandomID_Uniqueness(t *testing.T) {
+	seen := make(map[string]bool)
+	for i := 0; i < 100; i++ {
+		id := proto.RandomID(12)
+		if seen[id] {
+			t.Fatalf("RandomID collision: %q generated twice in 100 tries", id)
+		}
+		seen[id] = true
+	}
+}
+
+func TestDecodePayload_TypeMismatch(t *testing.T) {
+	msg := proto.Message{
+		Type:    proto.MsgAuth,
+		Payload: proto.AuthPayload{Token: "tok"},
+	}
+	var buf bytes.Buffer
+	proto.Write(&buf, msg)
+	got, _ := proto.Read(&buf)
+
+	// Decode into a completely different struct — should succeed (extra fields ignored).
+	var ack proto.ForwardAckPayload
+	if err := proto.DecodePayload(got, &ack); err != nil {
+		t.Fatalf("DecodePayload into wrong struct: %v", err)
+	}
+	// The Token field won't map to ID, so ID should be empty.
+	if ack.ID != "" {
+		t.Errorf("expected empty ID, got %q", ack.ID)
+	}
+}

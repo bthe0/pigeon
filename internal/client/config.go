@@ -20,6 +20,7 @@ type ForwardRule struct {
 	PublicAddr string         `json:"public_addr,omitempty"`  // assigned by server after connect
 	Expose     string         `json:"expose,omitempty"`       // "http" | "https"; default "https"
 	HTTPPassword string       `json:"http_password,omitempty"`
+	TLSSkipVerify  bool       `json:"tls_skip_verify,omitempty"` // allow self-signed certs on local HTTPS service
 	MaxConnections int        `json:"max_connections,omitempty"`
 	UnavailablePage string    `json:"unavailable_page,omitempty"`
 	RequestCount    int64     `json:"requests"` // in-memory only

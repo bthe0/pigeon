@@ -34,7 +34,7 @@ func New(cfg *Config) (*Client, error) {
 		return nil, err
 	}
 	logPath := filepath.Join(dir, time.Now().Format("2006-01-02")+".ndjson")
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +219,7 @@ func (c *Client) handleTCPStream(stream net.Conn, rule *ForwardRule, hdr proto.S
 		local, err = tls.DialWithDialer(
 			&net.Dialer{Timeout: 5 * time.Second},
 			"tcp", rule.LocalAddr,
-			&tls.Config{InsecureSkipVerify: true}, // local service may use self-signed cert
+			&tls.Config{InsecureSkipVerify: rule.TLSSkipVerify}, //nolint:gosec
 		)
 	} else {
 		local, err = net.DialTimeout("tcp", rule.LocalAddr, 5*time.Second)

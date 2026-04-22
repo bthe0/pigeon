@@ -48,7 +48,7 @@ func DaemonStart() error {
 		return err
 	}
 	logPath := filepath.Join(logDir, "daemon.log")
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
@@ -135,12 +135,8 @@ func DaemonRun(cfg *Config) {
 		if addr == "" {
 			addr = "127.0.0.1:8080"
 		}
-		url := "http://" + addr
-		if cfg.Token != "" {
-			url += "?token=" + cfg.Token
-		}
 		log.Printf("Web interface starting on %s", addr)
-		log.Printf("Access the dashboard at: %s", url)
+		log.Printf("Access the dashboard at: http://%s", addr)
 		if err := StartWebInterface(addr, false); err != nil {
 			log.Printf("Web interface failed: %v", err)
 		}
@@ -221,7 +217,7 @@ func DaemonRun(cfg *Config) {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 func writePID(path string, pid int) error {
-	return os.WriteFile(path, []byte(strconv.Itoa(pid)), 0644)
+	return os.WriteFile(path, []byte(strconv.Itoa(pid)), 0600)
 }
 
 func readPID(path string) (int, error) {
