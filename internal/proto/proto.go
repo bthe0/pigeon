@@ -1,25 +1,25 @@
 package proto
 
 import (
+	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
-	"crypto/rand"
 )
 
 type MessageType string
 
 const (
-	MsgAuth          MessageType = "auth"
-	MsgAuthAck       MessageType = "auth_ack"
-	MsgForwardAdd    MessageType = "forward_add"
-	MsgForwardAck    MessageType = "forward_ack"
-	MsgForwardRemove MessageType = "forward_remove"
+	MsgAuth           MessageType = "auth"
+	MsgAuthAck        MessageType = "auth_ack"
+	MsgForwardAdd     MessageType = "forward_add"
+	MsgForwardAck     MessageType = "forward_ack"
+	MsgForwardRemove  MessageType = "forward_remove"
 	MsgInspectorEvent MessageType = "inspector_event"
-	MsgPing          MessageType = "ping"
-	MsgPong          MessageType = "pong"
-	MsgError         MessageType = "error"
+	MsgPing           MessageType = "ping"
+	MsgPong           MessageType = "pong"
+	MsgError          MessageType = "error"
 )
 
 type Protocol string
@@ -47,15 +47,15 @@ type AuthAckPayload struct {
 }
 
 type ForwardPayload struct {
-	ID         string   `json:"id"`
-	Protocol   Protocol `json:"protocol"`
-	LocalAddr  string   `json:"local_addr"`            // e.g. "localhost:3000"
-	Domain     string   `json:"domain,omitempty"`      // http only
-	RemotePort int      `json:"remote_port,omitempty"` // tcp/udp; 0 = assign random
-	Expose     string   `json:"expose,omitempty"`      // "http" | "https"; default "https"
-	HTTPPassword string `json:"http_password,omitempty"`
-	MaxConnections int  `json:"max_connections,omitempty"`
-	UnavailablePage string `json:"unavailable_page,omitempty"`
+	ID              string   `json:"id"`
+	Protocol        Protocol `json:"protocol"`
+	LocalAddr       string   `json:"local_addr"`            // e.g. "localhost:3000"
+	Domain          string   `json:"domain,omitempty"`      // http only
+	RemotePort      int      `json:"remote_port,omitempty"` // tcp/udp; 0 = assign random
+	Expose          string   `json:"expose,omitempty"`      // "http" | "https"; default "https"
+	HTTPPassword    string   `json:"http_password,omitempty"`
+	MaxConnections  int      `json:"max_connections,omitempty"`
+	UnavailablePage string   `json:"unavailable_page,omitempty"`
 }
 
 type ForwardAckPayload struct {

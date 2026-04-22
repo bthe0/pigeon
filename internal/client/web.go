@@ -1,9 +1,9 @@
 package client
 
 import (
-	"encoding/json"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"embed"
-
 )
 
 //go:embed web/dist/*
@@ -72,7 +71,7 @@ func StartWebInterface(addr string, openBrowser bool) error {
 				h(w, r)
 				return
 			}
-			
+
 			if cookie, err := r.Cookie("pigeon_session"); err == nil {
 				if cookie.Value == sessionValue(cfg.DashboardPassword) {
 					h(w, r)
@@ -122,13 +121,13 @@ func StartWebInterface(addr string, openBrowser bool) error {
 
 		resp := map[string]interface{}{
 			"server":      cfg.Server,
-			"local_dev":    cfg.LocalDev,
+			"local_dev":   cfg.LocalDev,
 			"base_domain": cfg.BaseDomain,
 			"web_addr":    cfg.WebAddr,
 			"forwards":    cfg.Forwards,
 			"version":     AgentVersion,
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	})))

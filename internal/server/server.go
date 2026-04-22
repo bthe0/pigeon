@@ -86,14 +86,14 @@ type Server struct {
 	forwards      sync.Map // forward id → *forward
 	logger        *log.Logger
 	logFile       io.WriteCloser
-	geoCache      sync.Map        // ip -> geoInfo
+	geoCache      sync.Map // ip -> geoInfo
 	geoPauseUntil atomic.Int64
-	passwordFails sync.Map        // "fwdID:ip" -> *passwordRateEntry
+	passwordFails sync.Map // "fwdID:ip" -> *passwordRateEntry
 }
 
 type passwordRateEntry struct {
-	mu        sync.Mutex
-	count     int
+	mu          sync.Mutex
+	count       int
 	lockedUntil time.Time
 }
 
@@ -412,7 +412,6 @@ func (s *Server) serveUDP(pc net.PacketConn, fwd *forward) {
 		s.logTraffic(fwd, frame.Addr, "UDP", "OUT", len(frame.Data))
 	}
 }
-
 
 // ── HTTP serving ───────────────────────────────────────────────────────────────
 
@@ -761,5 +760,3 @@ func proxy(a, b io.ReadWriter) {
 	go cp(b, a)
 	<-done
 }
-
-

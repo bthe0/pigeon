@@ -11,29 +11,29 @@ import (
 )
 
 type ForwardRule struct {
-	ID         string         `json:"id"`
-	Protocol   proto.Protocol `json:"protocol"`
-	LocalAddr  string         `json:"local_addr"`
-	Domain     string         `json:"domain,omitempty"`
-	RemotePort int            `json:"remote_port,omitempty"`
-	Disabled   bool           `json:"disabled,omitempty"`
-	PublicAddr string         `json:"public_addr,omitempty"`  // assigned by server after connect
-	Expose     string         `json:"expose,omitempty"`       // "http" | "https"; default "https"
-	HTTPPassword string       `json:"http_password,omitempty"`
-	TLSSkipVerify  bool       `json:"tls_skip_verify,omitempty"` // allow self-signed certs on local HTTPS service
-	MaxConnections int        `json:"max_connections,omitempty"`
-	UnavailablePage string    `json:"unavailable_page,omitempty"`
-	RequestCount    int64     `json:"requests"` // in-memory only
-	ByteCount       int64     `json:"bytes"`    // in-memory only
+	ID              string         `json:"id"`
+	Protocol        proto.Protocol `json:"protocol"`
+	LocalAddr       string         `json:"local_addr"`
+	Domain          string         `json:"domain,omitempty"`
+	RemotePort      int            `json:"remote_port,omitempty"`
+	Disabled        bool           `json:"disabled,omitempty"`
+	PublicAddr      string         `json:"public_addr,omitempty"` // assigned by server after connect
+	Expose          string         `json:"expose,omitempty"`      // "http" | "https"; default "https"
+	HTTPPassword    string         `json:"http_password,omitempty"`
+	TLSSkipVerify   bool           `json:"tls_skip_verify,omitempty"` // allow self-signed certs on local HTTPS service
+	MaxConnections  int            `json:"max_connections,omitempty"`
+	UnavailablePage string         `json:"unavailable_page,omitempty"`
+	RequestCount    int64          `json:"requests"` // in-memory only
+	ByteCount       int64          `json:"bytes"`    // in-memory only
 }
 
 type Config struct {
-	Server     string        `json:"server"`               // host:port
-	Token      string        `json:"token"`
-	LocalDev   bool          `json:"local_dev"`            // true when running in local dev mode (self-signed TLS)
-	BaseDomain string        `json:"base_domain,omitempty"` // base domain for auto-assigned tunnel URLs
-	WebAddr    string        `json:"web_addr,omitempty"`    // address to run web interface on (default :8080)
-	DashboardPassword string     `json:"dashboard_password,omitempty"`
+	Server            string        `json:"server"` // host:port
+	Token             string        `json:"token"`
+	LocalDev          bool          `json:"local_dev"`             // true when running in local dev mode (self-signed TLS)
+	BaseDomain        string        `json:"base_domain,omitempty"` // base domain for auto-assigned tunnel URLs
+	WebAddr           string        `json:"web_addr,omitempty"`    // address to run web interface on (default :8080)
+	DashboardPassword string        `json:"dashboard_password,omitempty"`
 	Forwards          []ForwardRule `json:"forwards"`
 }
 
@@ -131,8 +131,6 @@ func (cfg *Config) RemoveForward(id string) bool {
 	}
 	return false
 }
-
-
 
 func (cfg *Config) UpdateForward(id string, rule ForwardRule) error {
 	cfg.normalizeForward(&rule)

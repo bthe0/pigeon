@@ -3,11 +3,16 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
+	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -391,6 +396,7 @@ func webCmd() *cobra.Command {
 
 func devCmd() *cobra.Command {
 	var controlAddr, httpAddr, httpsAddr, token, domain, certDir, logFile string
+	var watch bool
 
 	cmd := &cobra.Command{
 		Use:   "dev",
@@ -401,10 +407,25 @@ func devCmd() *cobra.Command {
   • Adds an /etc/hosts entry for each tunnel as it registers
   • Starts the server with TLS using the self-signed cert
 
+Add --watch to rebuild and restart automatically when any .go file changes.
+For frontend HMR run: cd internal/client/web && farm start
+
 Example:
   sudo pigeon dev --token secret
+  sudo pigeon dev --token secret --watch
   sudo pigeon dev --domain myapp.local --token secret`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if watch {
+				return runDevWatch(devWatchArgs{
+					controlAddr: controlAddr,
+					httpAddr:    httpAddr,
+					httpsAddr:   httpsAddr,
+					token:       token,
+					domain:      domain,
+					certDir:     certDir,
+					logFile:     logFile,
+				})
+			}
 			if token == "" {
 				return fmt.Errorf("--token is required")
 			}
@@ -494,7 +515,156 @@ Example:
 	cmd.PersistentFlags().StringVar(&domain, "domain", "pigeon.local", "Local base domain")
 	cmd.PersistentFlags().StringVar(&certDir, "cert-dir", "", "Directory for dev certs (default ~/.pigeon/dev-certs)")
 	cmd.PersistentFlags().StringVar(&logFile, "log", "", "Traffic log file (default: stdout)")
+	cmd.PersistentFlags().BoolVar(&watch, "watch", false, "Watch .go files and rebuild/restart on changes")
 	return cmd
+}
+
+// ── dev watch supervisor ───────────────────────────────────────────────────────
+
+type devWatchArgs struct {
+	controlAddr, httpAddr, httpsAddr string
+	token, domain, certDir, logFile  string
+}
+
+func runDevWatch(a devWatchArgs) error {
+	root, err := findGoModDir()
+	if err != nil {
+		return fmt.Errorf("could not find project root (go.mod): %w\nrun pigeon dev --watch from the project directory", err)
+	}
+
+	tmpBin := filepath.Join(os.TempDir(), fmt.Sprintf("pigeon-dev-%d", os.Getpid()))
+	defer os.Remove(tmpBin)
+
+	build := func() error {
+		log.Println("Building...")
+		c := exec.Command("go", "build", "-o", tmpBin, "./cmd/pigeon")
+		c.Dir = root
+		c.Stdout = os.Stdout
+		c.Stderr = os.Stderr
+		return c.Run()
+	}
+
+	childArgs := []string{"dev",
+		"--token", a.token,
+		"--domain", a.domain,
+		"--control", a.controlAddr,
+		"--http", a.httpAddr,
+		"--https", a.httpsAddr,
+	}
+	if a.certDir != "" {
+		childArgs = append(childArgs, "--cert-dir", a.certDir)
+	}
+	if a.logFile != "" {
+		childArgs = append(childArgs, "--log", a.logFile)
+	}
+
+	var (
+		mu    sync.Mutex
+		child *exec.Cmd
+	)
+
+	stopChild := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if child != nil && child.Process != nil {
+			child.Process.Signal(syscall.SIGTERM)
+			child.Wait()
+			child = nil
+		}
+	}
+
+	startChild := func() {
+		if err := build(); err != nil {
+			log.Printf("Build failed: %v", err)
+			return
+		}
+		mu.Lock()
+		child = exec.Command(tmpBin, childArgs...)
+		child.Stdout = os.Stdout
+		child.Stderr = os.Stderr
+		if err := child.Start(); err != nil {
+			log.Printf("Start failed: %v", err)
+			mu.Unlock()
+			return
+		}
+		log.Printf("Dev server started (PID %d)", child.Process.Pid)
+		mu.Unlock()
+	}
+
+	startChild()
+
+	// Poll for changed .go files; debounce rapid saves.
+	go func() {
+		mtimes := map[string]time.Time{}
+		initialized := false
+		var debounce *time.Timer
+
+		for {
+			time.Sleep(400 * time.Millisecond)
+			changed := false
+			filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+				if err != nil || d.IsDir() {
+					return nil
+				}
+				// Skip vendor, node_modules, hidden dirs.
+				for _, part := range strings.Split(path, string(filepath.Separator)) {
+					if part == "vendor" || part == "node_modules" || (len(part) > 1 && part[0] == '.') {
+						return fs.SkipDir
+					}
+				}
+				if !strings.HasSuffix(path, ".go") {
+					return nil
+				}
+				info, err := d.Info()
+				if err != nil {
+					return nil
+				}
+				if prev, ok := mtimes[path]; ok && info.ModTime().After(prev) {
+					changed = true
+				}
+				mtimes[path] = info.ModTime()
+				return nil
+			})
+			if !initialized {
+				initialized = true
+				log.Printf("Watching %s for .go changes (tip: run 'farm start' in internal/client/web for frontend HMR)", root)
+				continue
+			}
+			if changed {
+				if debounce != nil {
+					debounce.Stop()
+				}
+				debounce = time.AfterFunc(300*time.Millisecond, func() {
+					log.Println("Change detected — restarting...")
+					stopChild()
+					startChild()
+				})
+			}
+		}
+	}()
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	<-sigs
+	stopChild()
+	return nil
+}
+
+func findGoModDir() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("go.mod not found")
+		}
+		dir = parent
+	}
 }
 
 // ── pigeon setup ───────────────────────────────────────────────────────────────
@@ -511,7 +681,7 @@ func setupCmd() *cobra.Command {
 			fmt.Println("  [1] Server (VPS/Relay)")
 			fmt.Println("  [2] Client (Local Machine)")
 			fmt.Print("\nEnter 1 or 2: ")
-			
+
 			ans, _ := reader.ReadString('\n')
 			ans = strings.TrimSpace(ans)
 
@@ -534,7 +704,7 @@ func setupCmd() *cobra.Command {
 				fmt.Println("1. Configure DNS records for your domain (in your registrar or Cloudflare):")
 				fmt.Printf("   A   %s   <YOUR_SERVER_IP>\n", domain)
 				fmt.Printf("   A   *.%s <YOUR_SERVER_IP>\n", domain)
-				
+
 				fmt.Println("\n2. Nginx Reverse Proxy (Optional, if Pigeon shares port 80/443 with other apps):")
 				fmt.Printf(`   server {
        listen 80;
@@ -561,15 +731,15 @@ func setupCmd() *cobra.Command {
 						fmt.Println("❌ Could not determine executable path.")
 					} else {
 						// Write token to a separate env file with restricted permissions.
-					envContent := fmt.Sprintf("PIGEON_TOKEN=%s\n", token)
-					envFile := "/etc/pigeon/token.env"
-					if mkErr := os.MkdirAll("/etc/pigeon", 0700); mkErr != nil {
-						fmt.Printf("❌ Failed to create /etc/pigeon: %v\n", mkErr)
-					} else if envErr := os.WriteFile(envFile, []byte(envContent), 0600); envErr != nil {
-						fmt.Printf("❌ Failed to write token env file: %v\n", envErr)
-					}
+						envContent := fmt.Sprintf("PIGEON_TOKEN=%s\n", token)
+						envFile := "/etc/pigeon/token.env"
+						if mkErr := os.MkdirAll("/etc/pigeon", 0700); mkErr != nil {
+							fmt.Printf("❌ Failed to create /etc/pigeon: %v\n", mkErr)
+						} else if envErr := os.WriteFile(envFile, []byte(envContent), 0600); envErr != nil {
+							fmt.Printf("❌ Failed to write token env file: %v\n", envErr)
+						}
 
-					svcContent := fmt.Sprintf(`[Unit]
+						svcContent := fmt.Sprintf(`[Unit]
 Description=Pigeon Tunnel Server
 After=network.target
 
@@ -582,19 +752,19 @@ User=root
 [Install]
 WantedBy=multi-user.target
 `, execPath, domain)
-					err = os.WriteFile("/etc/systemd/system/pigeon-server.service", []byte(svcContent), 0644)
-					if err != nil {
-						fmt.Printf("❌ Failed to write service file (try running setup as root / sudo): %v\n", err)
-					} else {
-						fmt.Println("✅ Service written to /etc/systemd/system/pigeon-server.service")
-						fmt.Printf("✅ Token stored in %s (readable only by root)\n", envFile)
-						exec.Command("systemctl", "daemon-reload").Run()
-						if err := exec.Command("systemctl", "enable", "--now", "pigeon-server").Run(); err != nil {
-							fmt.Printf("❌ Failed to enable/start service: %v\n", err)
+						err = os.WriteFile("/etc/systemd/system/pigeon-server.service", []byte(svcContent), 0644)
+						if err != nil {
+							fmt.Printf("❌ Failed to write service file (try running setup as root / sudo): %v\n", err)
 						} else {
-							fmt.Println("✅ Pigeon Server is now running and enabled on boot!")
+							fmt.Println("✅ Service written to /etc/systemd/system/pigeon-server.service")
+							fmt.Printf("✅ Token stored in %s (readable only by root)\n", envFile)
+							exec.Command("systemctl", "daemon-reload").Run()
+							if err := exec.Command("systemctl", "enable", "--now", "pigeon-server").Run(); err != nil {
+								fmt.Printf("❌ Failed to enable/start service: %v\n", err)
+							} else {
+								fmt.Println("✅ Pigeon Server is now running and enabled on boot!")
+							}
 						}
-					}
 					}
 				}
 
@@ -666,7 +836,6 @@ WantedBy=multi-user.target
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────────
-
 
 func checkServerValidity(addr, token string) error {
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)

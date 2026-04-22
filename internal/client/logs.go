@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	metricsMu sync.RWMutex
+	metricsMu  sync.RWMutex
 	metricsMap = make(map[string]*ForwardMetrics)
 )
 
@@ -184,13 +184,13 @@ func FetchRecentLogs(filter string, limit int) ([]proto.TrafficLogEntry, error) 
 	daemonLog := filepath.Join(logDir, "daemon.log")
 	if f, err := os.Open(daemonLog); err == nil {
 		defer f.Close()
-		
+
 		// Simple tail: skip to near end
 		info, _ := f.Stat()
 		if info.Size() > 10000 {
 			f.Seek(-10000, io.SeekEnd)
 		}
-		
+
 		scanner := bufio.NewScanner(f)
 		var daemonEntries []proto.TrafficLogEntry
 		for scanner.Scan() {
@@ -227,7 +227,9 @@ func FetchRecentLogs(filter string, limit int) ([]proto.TrafficLogEntry, error) 
 			scanner := bufio.NewScanner(f)
 			for scanner.Scan() {
 				line := scanner.Text()
-				if line == "" { continue }
+				if line == "" {
+					continue
+				}
 				var e proto.TrafficLogEntry
 				if err := json.Unmarshal([]byte(line), &e); err == nil {
 					if filter == "" || e.ForwardID == filter {
@@ -243,6 +245,7 @@ func FetchRecentLogs(filter string, limit int) ([]proto.TrafficLogEntry, error) 
 	}
 	return entries, nil
 }
+
 type ForwardMetrics struct {
 	Requests int64 `json:"requests"`
 	Bytes    int64 `json:"bytes"`
@@ -252,7 +255,7 @@ type ForwardMetrics struct {
 func GetMetrics() (map[string]*ForwardMetrics, error) {
 	metricsMu.RLock()
 	defer metricsMu.RUnlock()
-	
+
 	// Copy to avoid race on return
 	res := make(map[string]*ForwardMetrics)
 	for k, v := range metricsMap {
