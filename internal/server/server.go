@@ -1,7 +1,7 @@
 package server
 
 import (
-	"context"
+	"bufio"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
@@ -26,6 +26,19 @@ import (
 	"github.com/hashicorp/yamux"
 	"golang.org/x/crypto/acme/autocert"
 )
+
+var streamCopyBufferPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 32*1024)
+		return &b
+	},
+}
+
+func copyStream(dst io.Writer, src io.Reader) {
+	buf := streamCopyBufferPool.Get().(*[]byte)
+	defer streamCopyBufferPool.Put(buf)
+	_, _ = io.CopyBuffer(dst, src, *buf)
+}
 
 //go:embed templates/*.html
 var templatesFS embed.FS
@@ -498,7 +511,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := proto.WriteStreamHeader(stream, proto.StreamHeader{
 		ForwardID:  fwd.id,
 		RemoteAddr: r.RemoteAddr,
-		Protocol:   proto.ProtoHTTP,
+		Protocol:   fwd.protocol,
 	}); err != nil {
 		http.Error(w, "tunnel write error", http.StatusBadGateway)
 		return
@@ -556,13 +569,40 @@ type connTransport struct {
 }
 
 func (t *connTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Use a one-shot http.Transport that dials our existing conn
-	tr := &http.Transport{
-		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-			return t.conn, nil
-		},
+	clone := req.Clone(req.Context())
+	clone.Close = true
+	clone.RequestURI = ""
+	done := make(chan struct{})
+	var once sync.Once
+	stop := func() { once.Do(func() { close(done) }) }
+	go func() {
+		select {
+		case <-req.Context().Done():
+			_ = t.conn.Close()
+		case <-done:
+		}
+	}()
+	if err := clone.Write(t.conn); err != nil {
+		stop()
+		return nil, err
 	}
-	return tr.RoundTrip(req)
+	resp, err := http.ReadResponse(bufio.NewReader(t.conn), clone)
+	if err != nil {
+		stop()
+		return nil, err
+	}
+	resp.Body = &cancelAwareReadCloser{ReadCloser: resp.Body, stop: stop}
+	return resp, nil
+}
+
+type cancelAwareReadCloser struct {
+	io.ReadCloser
+	stop func()
+}
+
+func (c *cancelAwareReadCloser) Close() error {
+	c.stop()
+	return c.ReadCloser.Close()
 }
 
 type captureWriter struct {
@@ -753,7 +793,7 @@ func (s *Server) logTraffic(fwd *forward, remoteAddr, protocol, action string, b
 func proxy(a, b io.ReadWriter) {
 	done := make(chan struct{}, 2)
 	cp := func(dst io.Writer, src io.Reader) {
-		io.Copy(dst, src)
+		copyStream(dst, src)
 		done <- struct{}{}
 	}
 	go cp(a, b)
