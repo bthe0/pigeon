@@ -92,6 +92,7 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 	cfg.normalizeForwards()
+	cfg.assignMissingIDs()
 	return &cfg, nil
 }
 
@@ -144,6 +145,14 @@ func (cfg *Config) UpdateForward(id string, rule ForwardRule) error {
 		}
 	}
 	return fmt.Errorf("forward not found")
+}
+
+func (cfg *Config) assignMissingIDs() {
+	for i := range cfg.Forwards {
+		if cfg.Forwards[i].ID == "" {
+			cfg.Forwards[i].ID = proto.RandomID(8)
+		}
+	}
 }
 
 func (cfg *Config) normalizeForwards() {
