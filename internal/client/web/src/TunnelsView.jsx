@@ -65,6 +65,7 @@ export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, ba
     try {
       const res = await fetch(`/api/forwards/${deleteId}`, { method: 'DELETE' });
       if(!res.ok) throw new Error(await res.text());
+      await new Promise(r => setTimeout(r, 150));
       await reloadConfig();
     } catch(err) {
       alert("Error deleting: " + err.message);
@@ -144,7 +145,7 @@ export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, ba
     try {
       const localAddr = form.localAddr.trim();
       let domainVal = form.domain.trim() || undefined;
-      if (domainVal && baseDomain && !domainVal.includes('.')) {
+      if (domainVal && baseDomain && !domainVal.endsWith('.' + baseDomain) && domainVal !== baseDomain) {
         domainVal = `${domainVal}.${baseDomain}`;
       }
       const remotePort = String(form.port || '').trim();
@@ -172,6 +173,7 @@ export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, ba
       setFormErrors({});
       setNewOpen(false);
       setEditId(null);
+      await new Promise(r => setTimeout(r, 150));
       await reloadConfig();
     } catch(err) {
       alert("Error saving tunnel: " + err.message);
@@ -198,6 +200,7 @@ export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, ba
         body: JSON.stringify(payload)
       });
       if(!res.ok) throw new Error(await res.text());
+      await new Promise(r => setTimeout(r, 150));
       await reloadConfig();
     } catch(err) {
       alert("Error toggling: " + err.message);
@@ -225,6 +228,7 @@ export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, ba
         body: JSON.stringify(payload)
       });
       if(!res.ok) throw new Error(await res.text());
+      await new Promise(r => setTimeout(r, 150));
       await reloadConfig();
     } catch(err) {
       alert("Error updating expose: " + err.message);
