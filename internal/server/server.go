@@ -446,7 +446,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	isTLS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 	log.Printf("[DEBUG] Host: %s | isTLS: %v | Proto: %s | Headers: %v", host, isTLS, r.Header.Get("X-Forwarded-Proto"), r.Header)
-	
+
 	// Default to HTTPS if expose is empty or explicitly set to both
 	expose := fwd.expose
 	if expose == "" || expose == "both" {

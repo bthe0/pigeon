@@ -209,7 +209,7 @@ export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, ba
 
   async function cycleExpose(t) {
     const sslOn = t.expose !== 'http';
-    const next = sslOn ? 'http' : 'both';
+    const next = sslOn ? 'http' : 'https';
     try {
       const payload = {
         protocol: t.proto,

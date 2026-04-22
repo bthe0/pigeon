@@ -280,7 +280,6 @@ func (c *Client) handleUDPStream(stream net.Conn, rule *ForwardRule) {
 			lc, err := net.ListenPacket("udp", "127.0.0.1:0")
 			if err != nil {
 				sessionsMu.Unlock()
-				log.Printf("[%s] UDP session open: %v", rule.ID, err)
 				continue
 			}
 			sessions[extAddr] = lc
@@ -330,7 +329,6 @@ func (c *Client) sendForwardAdd(rule ForwardRule) error {
 		(rule.Protocol == proto.ProtoHTTP || rule.Protocol == proto.ProtoHTTPS) {
 		domain = rule.PublicAddr
 	}
-	log.Printf("[DEBUG] Registering Forward: %s | Protocol: %s | Expose: %s", rule.ID, rule.Protocol, rule.Expose)
 	return proto.Write(c.ctrl, proto.Message{
 		Type: proto.MsgForwardAdd,
 		Payload: proto.ForwardPayload{
