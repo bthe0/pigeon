@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"crypto/rand"
 )
 
 type MessageType string
@@ -51,7 +52,7 @@ type ForwardPayload struct {
 	LocalAddr  string   `json:"local_addr"`            // e.g. "localhost:3000"
 	Domain     string   `json:"domain,omitempty"`      // http only
 	RemotePort int      `json:"remote_port,omitempty"` // tcp/udp; 0 = assign random
-	Expose     string   `json:"expose,omitempty"`      // "both" | "http" | "https"; default "both"
+	Expose     string   `json:"expose,omitempty"`      // "http" | "https"; default "https"
 	HTTPPassword string `json:"http_password,omitempty"`
 	MaxConnections int  `json:"max_connections,omitempty"`
 	UnavailablePage string `json:"unavailable_page,omitempty"`
@@ -172,4 +173,35 @@ func ReadStreamHeader(r io.Reader) (StreamHeader, error) {
 	}
 	var h StreamHeader
 	return h, json.Unmarshal(data, &h)
+}
+
+// UDPFrame is a framed UDP datagram.
+type UDPFrame struct {
+	Addr string `json:"addr"`
+	Data []byte `json:"data"`
+}
+
+// TrafficLogEntry represents a single traffic log record.
+type TrafficLogEntry struct {
+	Time       string `json:"time"`
+	ForwardID  string `json:"forward_id"`
+	Domain     string `json:"domain,omitempty"`
+	RemoteAddr string `json:"remote_addr"`
+	Protocol   string `json:"protocol"`
+	Action     string `json:"action"`
+	Bytes      int    `json:"bytes,omitempty"`
+}
+
+const idChars = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+// RandomID generates a secure random string of length n.
+func RandomID(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	for i := range b {
+		b[i] = idChars[int(b[i])%len(idChars)]
+	}
+	return string(b)
 }

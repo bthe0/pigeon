@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -20,11 +19,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"embed"
+	"html/template"
+
 	"github.com/bthe0/pigeon/internal/proto"
 	"github.com/hashicorp/yamux"
 	"golang.org/x/crypto/acme/autocert"
-	"embed"
-	"html/template"
 )
 
 //go:embed templates/*.html
@@ -56,7 +56,7 @@ type forward struct {
 	publicAddr      string
 	domain          string
 	port            int
-	expose          string // "both" | "http" | "https"
+	expose          string // "http" | "https"; default "https"
 	httpPassword    string
 	maxConnections  int
 	unavailablePage string
@@ -164,7 +164,7 @@ func (s *Server) handleClient(conn net.Conn) {
 		return
 	}
 
-	clientID := randomID(8)
+	clientID := proto.RandomID(8)
 	sess := &session{id: clientID, mux: mux, ctrl: ctrl, forwards: make(map[string]*forward)}
 	sess.writeMessage(proto.Message{Type: proto.MsgAuthAck, Payload: proto.AuthAckPayload{
 		ClientID:   clientID,
@@ -229,7 +229,7 @@ func (s *Server) registerForward(sess *session, p *proto.ForwardPayload) (string
 	case proto.ProtoHTTP, proto.ProtoHTTPS:
 		domain := p.Domain
 		if domain == "" {
-			domain = randomID(8) + "." + s.cfg.Domain
+			domain = proto.RandomID(8) + "." + s.cfg.Domain
 		}
 		fwd.publicAddr = domain
 		s.sessions.Store("http:"+domain, fwd)
@@ -383,7 +383,7 @@ func (s *Server) serveUDP(pc net.PacketConn, fwd *forward) {
 			if err != nil {
 				return
 			}
-			enc.Encode(udpFrame{Addr: addr.String(), Data: buf[:n]})
+			enc.Encode(proto.UDPFrame{Addr: addr.String(), Data: buf[:n]})
 			s.logTraffic(fwd, addr.String(), "UDP", "IN", n)
 		}
 	}()
@@ -391,7 +391,7 @@ func (s *Server) serveUDP(pc net.PacketConn, fwd *forward) {
 	// Client → server: read framed datagrams, send them
 	dec := json.NewDecoder(stream)
 	for {
-		var frame udpFrame
+		var frame proto.UDPFrame
 		if err := dec.Decode(&frame); err != nil {
 			return
 		}
@@ -404,9 +404,7 @@ func (s *Server) serveUDP(pc net.PacketConn, fwd *forward) {
 	}
 }
 
-type udpFrame struct {
-	Addr string `json:"addr"`
-	Data []byte `json:"data"`
+	}
 }
 
 // ── HTTP serving ───────────────────────────────────────────────────────────────
@@ -602,7 +600,7 @@ func pageVariant(variant string) string {
 }
 
 func (s *Server) authorizeTunnelPassword(w http.ResponseWriter, r *http.Request, fwd *forward) bool {
-	if r.URL.Query().Get("pigeon_password") == fwd.httpPassword {
+	if _, pass, ok := r.BasicAuth(); ok && pass == fwd.httpPassword {
 		return true
 	}
 	if _, pass, ok := r.BasicAuth(); ok && pass == fwd.httpPassword {
@@ -696,23 +694,10 @@ func writePasswordPage(w http.ResponseWriter, variant, title, message, errMsg st
 	}
 }
 
-
 // ── Logging ────────────────────────────────────────────────────────────────────
-
-// ── Logging ────────────────────────────────────────────────────────────────────
-
-type LogEntry struct {
-	Time       string `json:"time"`
-	ForwardID  string `json:"forward_id"`
-	Domain     string `json:"domain"`
-	RemoteAddr string `json:"remote_addr"`
-	Protocol   string `json:"protocol"`
-	Action     string `json:"action"`
-	Bytes      int    `json:"bytes,omitempty"`
-}
 
 func (s *Server) logTraffic(fwd *forward, remoteAddr, protocol, action string, bytes int) {
-	entry := LogEntry{
+	entry := proto.TrafficLogEntry{
 		Time:       time.Now().Format(time.RFC3339),
 		ForwardID:  fwd.id,
 		Domain:     fwd.publicAddr,
@@ -738,24 +723,4 @@ func proxy(a, b io.ReadWriter) {
 	<-done
 }
 
-const idChars = "abcdefghijklmnopqrstuvwxyz0123456789"
 
-func randomID(n int) string {
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = idChars[rand.Intn(len(idChars))]
-	}
-	return string(b)
-}
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
-
-// domainFromHost strips port from a host header.
-func domainFromHost(host string) string {
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		return strings.ToLower(h)
-	}
-	return strings.ToLower(host)
-}

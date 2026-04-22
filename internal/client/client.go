@@ -23,6 +23,7 @@ type Client struct {
 	ctrl    net.Conn
 	logger  *log.Logger
 	logFile io.WriteCloser
+	inspector *InspectorWriter
 	OnAddr  func(id, publicAddr string) // called when a forward is acknowledged
 }
 
@@ -38,7 +39,8 @@ func New(cfg *Config) (*Client, error) {
 		return nil, err
 	}
 
-	c := &Client{cfg: cfg, logFile: f}
+	iw, _ := NewInspectorWriter()
+	c := &Client{cfg: cfg, logFile: f, inspector: iw}
 	c.logger = log.New(io.MultiWriter(os.Stdout, f), "", 0)
 	return c, nil
 }
@@ -140,26 +142,28 @@ func (c *Client) controlLoop() error {
 		case proto.MsgInspectorEvent:
 			var e proto.InspectorEventPayload
 			if err := proto.DecodePayload(msg, &e); err == nil {
-				_ = appendInspectorEntry(InspectorEntry{
-					Time:            e.Time,
-					ForwardID:       e.ForwardID,
-					Domain:          e.Domain,
-					RemoteAddr:      e.RemoteAddr,
-					Method:          e.Method,
-					Path:            e.Path,
-					Status:          e.Status,
-					DurationMs:      e.DurationMs,
-					Bytes:           e.Bytes,
-					City:            e.City,
-					Country:         e.Country,
-					CountryCode:     e.CountryCode,
-					Latitude:        e.Latitude,
-					Longitude:       e.Longitude,
-					Browser:         e.Browser,
-					OS:              e.OS,
-					RequestHeaders:  e.RequestHeaders,
-					ResponseHeaders: e.ResponseHeaders,
-				})
+				if c.inspector != nil {
+					_ = c.inspector.Write(InspectorEntry{
+						Time:            e.Time,
+						ForwardID:       e.ForwardID,
+						Domain:          e.Domain,
+						RemoteAddr:      e.RemoteAddr,
+						Method:          e.Method,
+						Path:            e.Path,
+						Status:          e.Status,
+						DurationMs:      e.DurationMs,
+						Bytes:           e.Bytes,
+						City:            e.City,
+						Country:         e.Country,
+						CountryCode:     e.CountryCode,
+						Latitude:        e.Latitude,
+						Longitude:       e.Longitude,
+						Browser:         e.Browser,
+						OS:              e.OS,
+						RequestHeaders:  e.RequestHeaders,
+						ResponseHeaders: e.ResponseHeaders,
+					})
+				}
 			}
 		case proto.MsgPing:
 			proto.Write(c.ctrl, proto.Message{Type: proto.MsgPong})
@@ -262,12 +266,12 @@ func (c *Client) handleUDPStream(stream net.Conn, rule *ForwardRule) {
 	sendToServer := func(extAddr string, data []byte) {
 		encMu.Lock()
 		defer encMu.Unlock()
-		enc.Encode(udpFrame{Addr: extAddr, Data: data})
+		enc.Encode(proto.UDPFrame{Addr: extAddr, Data: data})
 	}
 
 	dec := json.NewDecoder(stream)
 	for {
-		var frame udpFrame
+		var frame proto.UDPFrame
 		if err := dec.Decode(&frame); err != nil {
 			return
 		}
@@ -311,15 +315,8 @@ func (c *Client) handleUDPStream(stream net.Conn, rule *ForwardRule) {
 	}
 }
 
-type udpFrame struct {
-	Addr string `json:"addr"`
-	Data []byte `json:"data"`
-}
 
-// SendForwardAdd registers a new forward with the server.
-func (c *Client) SendForwardAdd(rule ForwardRule) error {
-	return c.sendForwardAdd(rule)
-}
+
 
 func (c *Client) sendForwardAdd(rule ForwardRule) error {
 	domain := rule.Domain
@@ -345,13 +342,6 @@ func (c *Client) sendForwardAdd(rule ForwardRule) error {
 	})
 }
 
-// SendForwardRemove deregisters a forward.
-func (c *Client) SendForwardRemove(id string) error {
-	return proto.Write(c.ctrl, proto.Message{
-		Type:    proto.MsgForwardRemove,
-		Payload: proto.ForwardRemovePayload{ID: id},
-	})
-}
 
 // Close shuts down the client.
 func (c *Client) Close() {
@@ -361,21 +351,16 @@ func (c *Client) Close() {
 	if c.logFile != nil {
 		c.logFile.Close()
 	}
+	if c.inspector != nil {
+		c.inspector.Close()
+	}
 }
 
 // ── Logging ────────────────────────────────────────────────────────────────────
 
-type LogEntry struct {
-	Time       string `json:"time"`
-	ForwardID  string `json:"forward_id"`
-	RemoteAddr string `json:"remote_addr"`
-	Protocol   string `json:"protocol"`
-	Action     string `json:"action"`
-	Bytes      int    `json:"bytes,omitempty"`
-}
-
 func (c *Client) logTraffic(rule *ForwardRule, remoteAddr, protocol, action string, bytes int) {
-	entry := LogEntry{
+	UpdateMetrics(rule.ID, bytes)
+	entry := proto.TrafficLogEntry{
 		Time:       time.Now().Format(time.RFC3339),
 		ForwardID:  rule.ID,
 		RemoteAddr: remoteAddr,

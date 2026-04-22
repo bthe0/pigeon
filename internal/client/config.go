@@ -18,7 +18,7 @@ type ForwardRule struct {
 	RemotePort int            `json:"remote_port,omitempty"`
 	Disabled   bool           `json:"disabled,omitempty"`
 	PublicAddr string         `json:"public_addr,omitempty"`  // assigned by server after connect
-	Expose     string         `json:"expose,omitempty"`       // "both" | "http" | "https"; default "both"
+	Expose     string         `json:"expose,omitempty"`       // "http" | "https"; default "https"
 	HTTPPassword string       `json:"http_password,omitempty"`
 	MaxConnections int        `json:"max_connections,omitempty"`
 	UnavailablePage string    `json:"unavailable_page,omitempty"`
@@ -130,14 +130,7 @@ func (cfg *Config) RemoveForward(id string) bool {
 	return false
 }
 
-func (cfg *Config) SetPublicAddr(id, publicAddr string) {
-	for i := range cfg.Forwards {
-		if cfg.Forwards[i].ID == id {
-			cfg.Forwards[i].PublicAddr = publicAddr
-			return
-		}
-	}
-}
+
 
 func (cfg *Config) UpdateForward(id string, rule ForwardRule) error {
 	cfg.normalizeForward(&rule)

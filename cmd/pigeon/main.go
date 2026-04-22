@@ -115,7 +115,7 @@ func initCmd() *cobra.Command {
 				return fmt.Errorf("--token is required")
 			}
 			if webAddr == "" {
-				webAddr = ":8080"
+				webAddr = "127.0.0.1:8080"
 			}
 			if !strings.Contains(webAddr, ":") {
 				webAddr = ":" + webAddr
@@ -138,7 +138,7 @@ func initCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&serverAddr, "server", "", "Server address, e.g. tun.example.com:2222")
 	cmd.Flags().StringVar(&token, "token", "", "Shared auth token")
-	cmd.Flags().StringVar(&webAddr, "web", ":8080", "Dashboard listen address")
+	cmd.Flags().StringVar(&webAddr, "web", "127.0.0.1:8080", "Dashboard listen address")
 	return cmd
 }
 
@@ -220,7 +220,7 @@ func forwardCmd() *cobra.Command {
 			}
 
 			rule := client.ForwardRule{
-				ID:         randomID(8),
+				ID:         proto.RandomID(8),
 				Protocol:   protocol,
 				LocalAddr:  args[1],
 				Domain:     domain,
@@ -374,7 +374,7 @@ func webCmd() *cobra.Command {
 			fmt.Printf("Opening dashboard at %s\n", url)
 			client.OpenBrowser(url)
 
-			err := client.StartWebInterface(addr)
+			err := client.StartWebInterface(addr, true)
 			if err != nil && strings.Contains(err.Error(), "address already in use") {
 				// Dashboard is likely already running in the background daemon
 				fmt.Println("Dashboard is already running (likely via the background daemon).")
@@ -525,7 +525,7 @@ func setupCmd() *cobra.Command {
 				token, _ := reader.ReadString('\n')
 				token = strings.TrimSpace(token)
 				if token == "" {
-					token = randomID(16)
+					token = proto.RandomID(16)
 					fmt.Println("Generated token:", token)
 				}
 
@@ -648,16 +648,6 @@ WantedBy=multi-user.target
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
-const idChars = "abcdefghijklmnopqrstuvwxyz0123456789"
-
-func randomID(n int) string {
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = idChars[time.Now().UnixNano()%int64(len(idChars))]
-		time.Sleep(time.Nanosecond)
-	}
-	return string(b)
-}
 
 func checkServerValidity(addr, token string) error {
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)

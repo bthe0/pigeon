@@ -3,9 +3,41 @@ package client
 import (
 	"bufio"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
+	"sync"
 )
+
+type InspectorWriter struct {
+	f  *os.File
+	mu sync.Mutex
+}
+
+func NewInspectorWriter() (*InspectorWriter, error) {
+	path, err := inspectorLogPath()
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, err
+	}
+	return &InspectorWriter{f: f}, nil
+}
+
+func (iw *InspectorWriter) Write(entry InspectorEntry) error {
+	iw.mu.Lock()
+	defer iw.mu.Unlock()
+	return json.NewEncoder(iw.f).Encode(entry)
+}
+
+func (iw *InspectorWriter) Close() error {
+	if iw.f != nil {
+		return iw.f.Close()
+	}
+	return nil
+}
 
 type InspectorEntry struct {
 	Time            string            `json:"time"`
@@ -36,18 +68,6 @@ func inspectorLogPath() (string, error) {
 	return filepath.Join(dir, "inspector.ndjson"), nil
 }
 
-func appendInspectorEntry(entry InspectorEntry) error {
-	path, err := inspectorLogPath()
-	if err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return json.NewEncoder(f).Encode(entry)
-}
 
 func FetchRecentInspectorEntries(limit int, filter string) ([]InspectorEntry, error) {
 	path, err := inspectorLogPath()

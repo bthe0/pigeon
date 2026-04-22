@@ -20,15 +20,7 @@ import (
 //go:embed web/dist/*
 var webFS embed.FS
 
-func randomID(n int) string {
-	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, n)
-	rand.Read(b)
-	for i := 0; i < n; i++ {
-		b[i] = chars[int(b[i])%len(chars)]
-	}
-	return string(b)
-}
+
 
 // AgentVersion is set at build time or by main before starting the web interface.
 var AgentVersion = "dev"
@@ -50,7 +42,8 @@ func OpenBrowser(url string) {
 	}
 }
 
-func StartWebInterface(addr string) error {
+func StartWebInterface(addr string, openBrowser bool) error {
+	mux := http.NewServeMux()
 	var handler http.Handler
 
 	// Try serving from local filesystem first (useful for dev)
@@ -66,7 +59,33 @@ func StartWebInterface(addr string) error {
 		handler = http.FileServer(http.FS(subFS))
 	}
 
-	http.Handle("/", handler)
+	mux.Handle("/", handler)
+
+	// Auth middleware
+	auth := func(h http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			cfg, err := LoadConfig()
+			if err != nil {
+				h(w, r) // Fallback if no config yet (setup phase)
+				return
+			}
+			
+			// Simple token check
+			token := r.Header.Get("Authorization")
+			if token == "" {
+				token = r.URL.Query().Get("token")
+			}
+			if strings.HasPrefix(token, "Bearer ") {
+				token = strings.TrimPrefix(token, "Bearer ")
+			}
+			
+			if token != cfg.Token {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			h(w, r)
+		}
+	}
 
 	noCache := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +94,7 @@ func StartWebInterface(addr string) error {
 		}
 	}
 
-	http.HandleFunc("/api/config", noCache(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/config", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
 		cfg, err := LoadConfig()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -98,9 +117,9 @@ func StartWebInterface(addr string) error {
 			Version string `json:"version"`
 		}
 		json.NewEncoder(w).Encode(configResponse{Config: cfg, Version: AgentVersion})
-	}))
+	})))
 
-	http.HandleFunc("/api/logs", noCache(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/logs", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
 		filter := r.URL.Query().Get("filter")
 		logs, err := FetchRecentLogs(filter, 100)
 		if err != nil {
@@ -109,9 +128,9 @@ func StartWebInterface(addr string) error {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(logs)
-	}))
+	})))
 
-	http.HandleFunc("/api/inspector", noCache(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/inspector", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
 		filter := r.URL.Query().Get("filter")
 		entries, err := FetchRecentInspectorEntries(100, filter)
 		if err != nil {
@@ -120,9 +139,9 @@ func StartWebInterface(addr string) error {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(entries)
-	}))
+	})))
 
-	http.HandleFunc("/api/forwards", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/forwards", auth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -149,7 +168,7 @@ func StartWebInterface(addr string) error {
 		}
 
 		rule := ForwardRule{
-			ID:              randomID(8),
+			ID:              proto.RandomID(8),
 			Protocol:        req.Protocol,
 			LocalAddr:       req.LocalAddr,
 			Domain:          req.Domain,
@@ -169,9 +188,9 @@ func StartWebInterface(addr string) error {
 		}
 		DaemonReload()
 		w.WriteHeader(http.StatusOK)
-	})
+	}))
 
-	http.HandleFunc("/api/forwards/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/forwards/", auth(func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Path[len("/api/forwards/"):]
 		if id == "" {
 			http.Error(w, "missing id", http.StatusBadRequest)
@@ -261,9 +280,9 @@ func StartWebInterface(addr string) error {
 		}
 
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	})
+	}))
 
-	http.HandleFunc("/api/restart", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/restart", auth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -275,15 +294,20 @@ func StartWebInterface(addr string) error {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-	})
+	}))
 
 	url := fmt.Sprintf("http://%s", addr)
+	if cfg, err := LoadConfig(); err == nil && cfg.Token != "" {
+		url += "?token=" + cfg.Token
+	}
 	fmt.Printf("Web interface running on %s\n", url)
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		OpenBrowser(url)
-	}()
+	if openBrowser {
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			OpenBrowser(url)
+		}()
+	}
 
-	return http.ListenAndServe(addr, nil)
+	return http.ListenAndServe(addr, mux)
 }
 

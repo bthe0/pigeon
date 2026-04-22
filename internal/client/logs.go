@@ -9,8 +9,27 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
+
+var (
+	metricsMu sync.RWMutex
+	metricsMap = make(map[string]*ForwardMetrics)
+)
+
+func UpdateMetrics(id string, bytes int) {
+	metricsMu.Lock()
+	defer metricsMu.Unlock()
+	m, ok := metricsMap[id]
+	if !ok {
+		m = &ForwardMetrics{}
+		metricsMap[id] = m
+	}
+	m.Requests++
+	m.Bytes += int64(bytes)
+}
 
 // TailLogs prints log entries, optionally filtered by forwardID or domain.
 func TailLogs(filter string, since time.Duration, limit int, follow bool) error {
@@ -160,22 +179,45 @@ func FetchRecentLogs(filter string, limit int) ([]LogEntry, error) {
 	latest := latestNDJSON(logDir)
 	var entries []LogEntry
 
-	// Read daemon.log
+	// Read daemon.log (tail last 50 lines)
 	daemonLog := filepath.Join(logDir, "daemon.log")
 	if f, err := os.Open(daemonLog); err == nil {
+		defer f.Close()
+		
+		// Simple tail: skip to near end
+		info, _ := f.Stat()
+		if info.Size() > 10000 {
+			f.Seek(-10000, io.SeekEnd)
+		}
+		
 		scanner := bufio.NewScanner(f)
+		var daemonEntries []LogEntry
 		for scanner.Scan() {
 			line := scanner.Text()
 			if line != "" {
-				entries = append(entries, LogEntry{
-					Time:      time.Now().Format(time.RFC3339),
+				// Try to extract timestamp if present (daemon log uses standard log package)
+				// Format: 2026/04/22 04:03:23 msg
+				timestamp := time.Now().Format(time.RFC3339)
+				msg := line
+				if len(line) > 19 && line[4] == '/' && line[7] == '/' {
+					if t, err := time.Parse("2006/01/02 15:04:05", line[:19]); err == nil {
+						timestamp = t.Format(time.RFC3339)
+						msg = line[20:]
+					}
+				}
+
+				daemonEntries = append(daemonEntries, LogEntry{
+					Time:      timestamp,
 					Protocol:  "DAEMON",
 					ForwardID: "system",
-					Action:    line,
+					Action:    msg,
 				})
 			}
 		}
-		f.Close()
+		if len(daemonEntries) > 50 {
+			daemonEntries = daemonEntries[len(daemonEntries)-50:]
+		}
+		entries = append(entries, daemonEntries...)
 	}
 
 	if latest != "" {
@@ -207,33 +249,16 @@ type ForwardMetrics struct {
 
 // GetMetrics aggregates total requests and bytes from all log files.
 func GetMetrics() (map[string]*ForwardMetrics, error) {
-	logDir, err := LogDir()
-	if err != nil {
-		return nil, err
-	}
-
-	metrics := make(map[string]*ForwardMetrics)
-	files, _ := filepath.Glob(filepath.Join(logDir, "*.ndjson"))
-
-	for _, path := range files {
-		f, err := os.Open(path)
-		if err != nil {
-			continue
+	metricsMu.RLock()
+	defer metricsMu.RUnlock()
+	
+	// Copy to avoid race on return
+	res := make(map[string]*ForwardMetrics)
+	for k, v := range metricsMap {
+		res[k] = &ForwardMetrics{
+			Requests: v.Requests,
+			Bytes:    v.Bytes,
 		}
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			var e LogEntry
-			if err := json.Unmarshal(scanner.Bytes(), &e); err == nil && e.ForwardID != "" {
-				m := metrics[e.ForwardID]
-				if m == nil {
-					m = &ForwardMetrics{}
-					metrics[e.ForwardID] = m
-				}
-				m.Requests++
-				m.Bytes += int64(e.Bytes)
-			}
-		}
-		f.Close()
 	}
-	return metrics, nil
+	return res, nil
 }

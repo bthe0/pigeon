@@ -133,10 +133,10 @@ func DaemonRun(cfg *Config) {
 	go func() {
 		addr := cfg.WebAddr
 		if addr == "" {
-			addr = ":8080"
+			addr = "127.0.0.1:8080"
 		}
 		log.Printf("Web interface starting on %s", addr)
-		if err := StartWebInterface(addr); err != nil {
+		if err := StartWebInterface(addr, false); err != nil {
 			log.Printf("Web interface failed: %v", err)
 		}
 	}()
