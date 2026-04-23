@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"text/tabwriter"
 
 	"github.com/bthe0/pigeon/internal/client"
@@ -18,20 +19,24 @@ func forwardCmd() *cobra.Command {
 
 	var domain string
 	var remotePort int
+	var allowIPs []string
+	var captureBodies bool
 
 	addCmd := &cobra.Command{
-		Use:   "add <http|tcp|udp> <local-addr>",
+		Use:   "add <http|https|tcp|udp|static> <local-addr|folder>",
 		Short: "Add a forward rule",
 		Example: `  pigeon forward add http localhost:80 --domain myapp.example.com
-  pigeon forward add tcp localhost:5432
-  pigeon forward add udp localhost:7777 --port 7777`,
+  pigeon forward add http localhost:80 --domain '*.preview.example.com'
+  pigeon forward add tcp localhost:5432 --allow 10.0.0.0/8
+  pigeon forward add udp localhost:7777 --port 7777
+  pigeon forward add static ./public --domain docs.example.com`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			protocol := proto.Protocol(args[0])
 			switch protocol {
-			case proto.ProtoHTTP, proto.ProtoHTTPS, proto.ProtoTCP, proto.ProtoUDP:
+			case proto.ProtoHTTP, proto.ProtoHTTPS, proto.ProtoTCP, proto.ProtoUDP, proto.ProtoStatic:
 			default:
-				return fmt.Errorf("protocol must be http, https, tcp, or udp")
+				return fmt.Errorf("protocol must be http, https, tcp, udp, or static")
 			}
 
 			cfg, err := client.LoadConfig()
@@ -40,11 +45,25 @@ func forwardCmd() *cobra.Command {
 			}
 
 			rule := client.ForwardRule{
-				ID:         proto.RandomID(8),
-				Protocol:   protocol,
-				LocalAddr:  args[1],
-				Domain:     domain,
-				RemotePort: remotePort,
+				ID:            proto.RandomID(8),
+				Protocol:      protocol,
+				Domain:        domain,
+				RemotePort:    remotePort,
+				AllowedIPs:    allowIPs,
+				CaptureBodies: captureBodies,
+			}
+			if protocol == proto.ProtoStatic {
+				abs, aerr := filepath.Abs(args[1])
+				if aerr != nil {
+					return fmt.Errorf("resolve static folder: %w", aerr)
+				}
+				info, serr := os.Stat(abs)
+				if serr != nil || !info.IsDir() {
+					return fmt.Errorf("static root %q is not a directory", args[1])
+				}
+				rule.StaticRoot = abs
+			} else {
+				rule.LocalAddr = args[1]
 			}
 			if err := cfg.AddForward(rule); err != nil {
 				return err
@@ -56,8 +75,10 @@ func forwardCmd() *cobra.Command {
 			return nil
 		},
 	}
-	addCmd.Flags().StringVar(&domain, "domain", "", "Custom domain (http only)")
+	addCmd.Flags().StringVar(&domain, "domain", "", "Custom domain (http/https/static; supports '*.x.example.com')")
 	addCmd.Flags().IntVar(&remotePort, "port", 0, "Remote port (tcp/udp; 0 = auto-assign)")
+	addCmd.Flags().StringSliceVar(&allowIPs, "allow", nil, "Restrict access to these IPs/CIDRs (repeatable)")
+	addCmd.Flags().BoolVar(&captureBodies, "capture-bodies", false, "Capture request/response bodies in the inspector (http only)")
 
 	removeCmd := &cobra.Command{
 		Use:   "remove <id|domain|port>",

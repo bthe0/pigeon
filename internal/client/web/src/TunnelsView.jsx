@@ -18,7 +18,7 @@ function SkeletonRow() {
 }
 
 export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, baseDomain, dashFetch }) {
-  const emptyForm = { localAddr: '', domain: '', port: '', proto: 'http', disabled: false, expose: 'both', httpPassword: '', maxConnections: '', unavailablePage: 'default' };
+  const emptyForm = { localAddr: '', domain: '', port: '', proto: 'http', disabled: false, expose: 'both', httpPassword: '', maxConnections: '', unavailablePage: 'default', allowedIPs: '', captureBodies: false, staticRoot: '' };
   const localAddrRef = useRef(null);
   const [newOpen, setNewOpen] = useState(false);
   const [editId, setEditId] = useState(null);
@@ -93,27 +93,57 @@ export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, ba
   function isValidDomain(value) {
     if (!value) return true;
     if (/\s/.test(value) || value.includes('://') || value.includes('/')) return false;
-    return value.split('.').every(part => /^[a-zA-Z0-9-]+$/.test(part) && !part.startsWith('-') && !part.endsWith('-'));
+    return value.split('.').every((part, i) => {
+      if (i === 0 && part === '*') return true; // leading wildcard label
+      return /^[a-zA-Z0-9-]+$/.test(part) && !part.startsWith('-') && !part.endsWith('-');
+    });
+  }
+
+  function parseAllowedIPs(value) {
+    return (value || '')
+      .split(/[\n,]/)
+      .map(s => s.trim())
+      .filter(Boolean);
+  }
+
+  function isValidCIDROrIP(value) {
+    const s = value.trim();
+    if (!s) return false;
+    const cidr = s.match(/^([0-9a-fA-F:.]+)\/(\d+)$/);
+    const host = cidr ? cidr[1] : s;
+    const prefix = cidr ? parseInt(cidr[2], 10) : null;
+    const isV4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(host);
+    const isV6 = host.includes(':') && /^[0-9a-fA-F:]+$/.test(host);
+    if (!isV4 && !isV6) return false;
+    if (isV4) {
+      if (host.split('.').some(o => { const n = parseInt(o, 10); return isNaN(n) || n < 0 || n > 255; })) return false;
+      if (cidr && (prefix < 0 || prefix > 32)) return false;
+    } else if (cidr && (prefix < 0 || prefix > 128)) return false;
+    return true;
   }
 
   function validateForm() {
     const errors = {};
     const localAddr = form.localAddr.trim();
     const isHTTP = form.proto === 'http' || form.proto === 'https';
+    const isStatic = form.proto === 'static';
     const domain = form.domain.trim();
     const port = String(form.port || '').trim();
     const maxConnections = String(form.maxConnections || '').trim();
     const httpPassword = String(form.httpPassword || '');
+    const staticRoot = (form.staticRoot || '').trim();
 
-    if (!localAddr) {
+    if (isStatic) {
+      if (!staticRoot) errors.staticRoot = 'Folder path is required.';
+    } else if (!localAddr) {
       errors.localAddr = 'Local address is required.';
     } else if (!isValidLocalAddr(localAddr)) {
       errors.localAddr = 'Use host:port, for example localhost:3000.';
     }
 
-    if (isHTTP) {
+    if (isHTTP || isStatic) {
       if (domain && !isValidDomain(domain)) {
-        errors.domain = 'Use a hostname only, like myapp or myapp.pigeon.local.';
+        errors.domain = 'Use a hostname, like myapp or *.preview.example.com.';
       }
     } else if (port && parsePortValue(port) === null) {
       errors.port = 'Remote port must be between 1 and 65535.';
@@ -133,6 +163,12 @@ export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, ba
       }
     }
 
+    const ips = parseAllowedIPs(form.allowedIPs);
+    const bad = ips.filter(ip => !isValidCIDROrIP(ip));
+    if (bad.length > 0) {
+      errors.allowedIPs = `Invalid IP or CIDR: ${bad[0]}`;
+    }
+
     return errors;
   }
 
@@ -145,21 +181,32 @@ export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, ba
     try {
       const localAddr = form.localAddr.trim();
       let domainVal = form.domain.trim() || undefined;
-      if (domainVal && baseDomain && !domainVal.endsWith('.' + baseDomain) && domainVal !== baseDomain) {
-        domainVal = `${domainVal}.${baseDomain}`;
+      if (domainVal && baseDomain) {
+        // Expand bare shorthand ("myapp", "*.preview") with the base domain,
+        // preserving the leading wildcard when present.
+        const withoutStar = domainVal.startsWith('*.') ? domainVal.slice(2) : domainVal;
+        if (!withoutStar.includes('.')) {
+          domainVal = (domainVal.startsWith('*.') ? '*.' : '') + withoutStar + '.' + baseDomain;
+        } else if (!domainVal.endsWith('.' + baseDomain) && domainVal !== baseDomain && !domainVal.endsWith(baseDomain)) {
+          domainVal = `${domainVal}.${baseDomain}`;
+        }
       }
       const remotePort = String(form.port || '').trim();
       const maxConnections = String(form.maxConnections || '').trim();
+      const allowedIPs = parseAllowedIPs(form.allowedIPs);
       const payload = {
         protocol: form.proto,
-        local_addr: localAddr,
+        local_addr: form.proto === 'static' ? '' : localAddr,
+        static_root: form.proto === 'static' ? (form.staticRoot || '').trim() : '',
         domain: domainVal,
         remote_port: remotePort ? parseInt(remotePort, 10) : 0,
         disabled: !!form.disabled,
         expose: form.expose || 'both',
         http_password: form.httpPassword || '',
         max_connections: maxConnections ? parseInt(maxConnections, 10) : 0,
-        unavailable_page: form.unavailablePage || 'default'
+        unavailable_page: form.unavailablePage || 'default',
+        allowed_ips: allowedIPs,
+        capture_bodies: !!form.captureBodies
       };
       const url = editId ? `/api/forwards/${editId}` : `/api/forwards`;
       const res = await dashFetch(url, {
@@ -185,14 +232,17 @@ export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, ba
     try {
       const payload = {
         protocol: t.proto,
-        local_addr: t.localPort,
+        local_addr: t.proto === 'static' ? '' : t.localPort,
+        static_root: t.staticRoot || '',
         domain: t.domain || undefined,
         remote_port: t.remotePort ? parseInt(t.remotePort) : 0,
         disabled: !t.disabled,
         expose: t.expose || 'both',
         http_password: t.httpPassword || '',
         max_connections: t.maxConnections || 0,
-        unavailable_page: t.unavailablePage || 'default'
+        unavailable_page: t.unavailablePage || 'default',
+        allowed_ips: t.allowedIPs || [],
+        capture_bodies: !!t.captureBodies
       };
       const res = await dashFetch(`/api/forwards/${t.id}`, {
         method: 'PUT',
@@ -213,14 +263,17 @@ export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, ba
     try {
       const payload = {
         protocol: t.proto,
-        local_addr: t.localPort,
+        local_addr: t.proto === 'static' ? '' : t.localPort,
+        static_root: t.staticRoot || '',
         domain: t.domain || undefined,
         remote_port: t.remotePort ? parseInt(t.remotePort) : 0,
         disabled: !!t.disabled,
         expose: next,
         http_password: t.httpPassword || '',
         max_connections: t.maxConnections || 0,
-        unavailable_page: t.unavailablePage || 'default'
+        unavailable_page: t.unavailablePage || 'default',
+        allowed_ips: t.allowedIPs || [],
+        capture_bodies: !!t.captureBodies
       };
       const res = await dashFetch(`/api/forwards/${t.id}`, {
         method: 'PUT',
@@ -237,7 +290,20 @@ export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, ba
 
   function openEdit(t) {
     setFormErrors({});
-    setForm({ localAddr: t.localPort, domain: t.domain || '', port: t.remotePort || '', proto: t.proto, disabled: !!t.disabled, expose: t.expose || 'both', httpPassword: t.httpPassword || '', maxConnections: t.maxConnections || '', unavailablePage: t.unavailablePage || 'default' });
+    setForm({
+      localAddr: t.proto === 'static' ? '' : t.localPort,
+      domain: t.domain || '',
+      port: t.remotePort || '',
+      proto: t.proto,
+      disabled: !!t.disabled,
+      expose: t.expose || 'both',
+      httpPassword: t.httpPassword || '',
+      maxConnections: t.maxConnections || '',
+      unavailablePage: t.unavailablePage || 'default',
+      allowedIPs: (t.allowedIPs || []).join('\n'),
+      captureBodies: !!t.captureBodies,
+      staticRoot: t.staticRoot || ''
+    });
     setEditId(t.id);
     setNewOpen(true);
   }
@@ -287,81 +353,109 @@ export function TunnelsView({ tunnels, loading, reloadConfig, onSelectTunnel, ba
       {newOpen && (
         <div style={{ position: 'absolute', inset: 0, background: '#00000088', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
           onClick={() => !isAdding && setNewOpen(false)}>
-          <form className="modal-form" style={{ background: 'var(--panel)', border: '1px solid var(--border2)', width: 420, padding: 24 }} onClick={e=>e.stopPropagation()} onSubmit={e => { e.preventDefault(); saveTunnel(); }}>
+          <form className="modal-form" style={{ background: 'var(--panel)', border: '1px solid var(--border2)', width: 720, maxWidth: 'calc(100vw - 48px)', padding: 24 }} onClick={e=>e.stopPropagation()} onSubmit={e => { e.preventDefault(); saveTunnel(); }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: '#fff' }}>{editId ? 'Edit Tunnel' : 'New Tunnel'}</span>
               <button type="button" disabled={isAdding} onClick={() => setNewOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)' }}><Icon d={Icons.x} size={16} color="currentColor" /></button>
             </div>
-            
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Protocol</label>
-              <select value={form.proto} onChange={e => setForm(x => ({...x, proto: e.target.value}))} disabled={isAdding}
-                style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }}>
-                <option value="http">HTTP</option>
-                <option value="https">HTTPS (local TLS service)</option>
-                <option value="tcp">TCP</option>
-                <option value="udp">UDP</option>
-              </select>
-            </div>
-            
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Local Address</label>
-              <input ref={localAddrRef} value={form.localAddr} onChange={e => { const value = e.target.value; setForm(x => ({...x, localAddr: value})); setFormErrors(x => ({ ...x, localAddr: undefined })); }} placeholder="localhost:3000" disabled={isAdding}
-                style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }} />
-              {formErrors.localAddr && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)' }}>{formErrors.localAddr}</div>}
-            </div>
-            
-            {(form.proto === 'http' || form.proto === 'https') ? (
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Domain (Optional)</label>
-                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border2)', background: 'var(--panel2)' }}>
-                  <input value={form.domain} onChange={e => { const value = e.target.value; setForm(x => ({...x, domain: value})); setFormErrors(x => ({ ...x, domain: undefined })); }} placeholder={baseDomain ? 'myapp' : 'myapp.tunnel.dev'} disabled={isAdding}
-                    style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }} />
-                  {baseDomain && !form.domain.endsWith('.' + baseDomain) && !form.domain.endsWith(baseDomain) && (
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--text-dim)', padding: '8px 10px 8px 0', whiteSpace: 'nowrap' }}>.{baseDomain}</span>
-                  )}
-                </div>
-                {formErrors.domain && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)' }}>{formErrors.domain}</div>}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Protocol</label>
+                <select value={form.proto} onChange={e => setForm(x => ({...x, proto: e.target.value}))} disabled={isAdding}
+                  style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }}>
+                  <option value="http">HTTP</option>
+                  <option value="https">HTTPS (local TLS service)</option>
+                  <option value="tcp">TCP</option>
+                  <option value="udp">UDP</option>
+                  <option value="static">Static (serve a folder)</option>
+                </select>
               </div>
-            ) : (
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Remote Port (Optional)</label>
-                <input type="number" value={form.port} onChange={e => { const value = e.target.value; setForm(x => ({...x, port: value})); setFormErrors(x => ({ ...x, port: undefined })); }} placeholder="0 for auto assign" disabled={isAdding}
-                  style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }} />
-                {formErrors.port && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)' }}>{formErrors.port}</div>}
-              </div>
-            )}
 
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Max Connections (Optional)</label>
-              <input type="number" min="1" value={form.maxConnections} onChange={e => { const value = e.target.value; setForm(x => ({...x, maxConnections: value})); setFormErrors(x => ({ ...x, maxConnections: undefined })); }} placeholder="Unlimited" disabled={isAdding}
-                style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }} />
-              {formErrors.maxConnections && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)' }}>{formErrors.maxConnections}</div>}
+              {form.proto === 'static' ? (
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Static Folder</label>
+                  <input ref={localAddrRef} value={form.staticRoot} onChange={e => { const value = e.target.value; setForm(x => ({...x, staticRoot: value})); setFormErrors(x => ({ ...x, staticRoot: undefined })); }} placeholder="/absolute/path/to/site" disabled={isAdding}
+                    style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none', boxSizing: 'border-box' }} />
+                  {formErrors.staticRoot && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)' }}>{formErrors.staticRoot}</div>}
+                </div>
+              ) : (
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Local Address</label>
+                  <input ref={localAddrRef} value={form.localAddr} onChange={e => { const value = e.target.value; setForm(x => ({...x, localAddr: value})); setFormErrors(x => ({ ...x, localAddr: undefined })); }} placeholder="localhost:3000" disabled={isAdding}
+                    style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none', boxSizing: 'border-box' }} />
+                  {formErrors.localAddr && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)' }}>{formErrors.localAddr}</div>}
+                </div>
+              )}
+
+              {(form.proto === 'http' || form.proto === 'https' || form.proto === 'static') ? (
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Domain (Optional)</label>
+                  <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border2)', background: 'var(--panel2)' }}>
+                    <input value={form.domain} onChange={e => { const value = e.target.value; setForm(x => ({...x, domain: value})); setFormErrors(x => ({ ...x, domain: undefined })); }} placeholder={baseDomain ? 'myapp' : 'myapp.tunnel.dev'} disabled={isAdding}
+                      style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }} />
+                    {baseDomain && !form.domain.endsWith('.' + baseDomain) && !form.domain.endsWith(baseDomain) && (
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--text-dim)', padding: '8px 10px 8px 0', whiteSpace: 'nowrap' }}>.{baseDomain}</span>
+                    )}
+                  </div>
+                  {formErrors.domain && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)' }}>{formErrors.domain}</div>}
+                </div>
+              ) : (
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Remote Port (Optional)</label>
+                  <input type="number" value={form.port} onChange={e => { const value = e.target.value; setForm(x => ({...x, port: value})); setFormErrors(x => ({ ...x, port: undefined })); }} placeholder="0 for auto assign" disabled={isAdding}
+                    style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none', boxSizing: 'border-box' }} />
+                  {formErrors.port && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)' }}>{formErrors.port}</div>}
+                </div>
+              )}
+
+              <div>
+                <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Max Connections (Optional)</label>
+                <input type="number" min="1" value={form.maxConnections} onChange={e => { const value = e.target.value; setForm(x => ({...x, maxConnections: value})); setFormErrors(x => ({ ...x, maxConnections: undefined })); }} placeholder="Unlimited" disabled={isAdding}
+                  style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none', boxSizing: 'border-box' }} />
+                {formErrors.maxConnections && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)' }}>{formErrors.maxConnections}</div>}
+              </div>
+
+              {(form.proto === 'http' || form.proto === 'https') && (
+                <>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>HTTP Password (Optional)</label>
+                    <input type="password" value={form.httpPassword} onChange={e => { const value = e.target.value; setForm(x => ({...x, httpPassword: value})); setFormErrors(x => ({ ...x, httpPassword: undefined })); }} placeholder="Protect with tunnel password" disabled={isAdding}
+                      style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none', boxSizing: 'border-box' }} />
+                    {formErrors.httpPassword && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)' }}>{formErrors.httpPassword}</div>}
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Unavailable Page</label>
+                    <select value={form.unavailablePage} onChange={e => setForm(x => ({...x, unavailablePage: e.target.value}))} disabled={isAdding}
+                      style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }}>
+                      <option value="default">Default</option>
+                      <option value="minimal">Minimal</option>
+                      <option value="terminal">Terminal</option>
+                    </select>
+                  </div>
+                </>
+              )}
+
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Allowed IPs (Optional)</label>
+                <textarea value={form.allowedIPs} onChange={e => { const value = e.target.value; setForm(x => ({...x, allowedIPs: value})); setFormErrors(x => ({ ...x, allowedIPs: undefined })); }} placeholder={`10.0.0.0/8\n203.0.113.5`} disabled={isAdding}
+                  rows={3}
+                  style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none', resize: 'vertical', boxSizing: 'border-box' }} />
+                <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-dim)' }}>One IP or CIDR per line. Empty = allow all.</div>
+                {formErrors.allowedIPs && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)' }}>{formErrors.allowedIPs}</div>}
+              </div>
+
+              {(form.proto === 'http' || form.proto === 'https') && (
+                <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="checkbox" id="capture_bodies" checked={!!form.captureBodies} onChange={e => setForm(x => ({...x, captureBodies: e.target.checked}))} disabled={isAdding} />
+                  <label htmlFor="capture_bodies" style={{ fontSize: 12, color: 'var(--text)' }}>Capture request/response bodies in inspector (up to 256&nbsp;KB)</label>
+                </div>
+              )}
             </div>
 
-            {(form.proto === 'http' || form.proto === 'https') && (
-              <>
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>HTTP Password (Optional)</label>
-                  <input type="password" value={form.httpPassword} onChange={e => { const value = e.target.value; setForm(x => ({...x, httpPassword: value})); setFormErrors(x => ({ ...x, httpPassword: undefined })); }} placeholder="Protect with tunnel password" disabled={isAdding}
-                    style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }} />
-                  {formErrors.httpPassword && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)' }}>{formErrors.httpPassword}</div>}
-                </div>
-
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Unavailable Page</label>
-                  <select value={form.unavailablePage} onChange={e => setForm(x => ({...x, unavailablePage: e.target.value}))} disabled={isAdding}
-                    style={{ width: '100%', background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--mono)', outline: 'none' }}>
-                    <option value="default">Default</option>
-                    <option value="minimal">Minimal</option>
-                    <option value="terminal">Terminal</option>
-                  </select>
-                </div>
-              </>
-            )}
-            
             <button type="submit" disabled={isAdding}
-              style={{ width: '100%', background: isAdding ? 'var(--accent-mid)' : 'var(--accent)', border: 'none', color: '#000', padding: '10px', fontSize: 13, fontWeight: 600, cursor: 'pointer', letterSpacing: '.03em', marginTop: 10 }}>
+              style={{ width: '100%', background: isAdding ? 'var(--accent-mid)' : 'var(--accent)', border: 'none', color: '#000', padding: '10px', fontSize: 13, fontWeight: 600, cursor: 'pointer', letterSpacing: '.03em', marginTop: 20 }}>
               {isAdding ? 'Saving...' : (editId ? 'Save Tunnel' : 'Start Tunnel')}
             </button>
           </form>

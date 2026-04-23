@@ -52,6 +52,11 @@ func (s *Server) serveTCP(ln net.Listener, fwd *forward) {
 		}
 		go func() {
 			defer conn.Close()
+			if host, _, err := net.SplitHostPort(conn.RemoteAddr().String()); err == nil {
+				if !fwd.allows(host) {
+					return
+				}
+			}
 			if !fwd.tryAcquire() {
 				return
 			}
@@ -97,6 +102,11 @@ func (s *Server) serveUDP(pc net.PacketConn, fwd *forward) {
 			n, addr, err := pc.ReadFrom(buf)
 			if err != nil {
 				return
+			}
+			if host, _, err := net.SplitHostPort(addr.String()); err == nil {
+				if !fwd.allows(host) {
+					continue
+				}
 			}
 			enc.Encode(proto.UDPFrame{Addr: addr.String(), Data: buf[:n]})
 			s.logTraffic(fwd, addr.String(), "UDP", "IN", n)

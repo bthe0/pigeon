@@ -26,11 +26,18 @@ const (
 type Protocol string
 
 const (
-	ProtoHTTP  Protocol = "http"
-	ProtoHTTPS Protocol = "https" // forward to a local service that speaks TLS
-	ProtoTCP   Protocol = "tcp"
-	ProtoUDP   Protocol = "udp"
+	ProtoHTTP   Protocol = "http"
+	ProtoHTTPS  Protocol = "https" // forward to a local service that speaks TLS
+	ProtoTCP    Protocol = "tcp"
+	ProtoUDP    Protocol = "udp"
+	ProtoStatic Protocol = "static" // serve a local directory; routed like HTTP
 )
+
+// IsHTTPLike reports whether p is routed via the HTTP plane (Host-header lookup,
+// public subdomain, optional TLS) rather than a dedicated TCP/UDP port.
+func (p Protocol) IsHTTPLike() bool {
+	return p == ProtoHTTP || p == ProtoHTTPS || p == ProtoStatic
+}
 
 // Message is the control channel message envelope.
 type Message struct {
@@ -50,13 +57,19 @@ type AuthAckPayload struct {
 type ForwardPayload struct {
 	ID              string   `json:"id"`
 	Protocol        Protocol `json:"protocol"`
-	LocalAddr       string   `json:"local_addr"`            // e.g. "localhost:3000"
-	Domain          string   `json:"domain,omitempty"`      // http only
+	LocalAddr       string   `json:"local_addr"`            // e.g. "localhost:3000"; empty for static
+	Domain          string   `json:"domain,omitempty"`      // http only; "*.x.y.z" allowed for one-level wildcards
 	RemotePort      int      `json:"remote_port,omitempty"` // tcp/udp; 0 = assign random
 	Expose          string   `json:"expose,omitempty"`      // "http" | "https"; default "https"
 	HTTPPassword    string   `json:"http_password,omitempty"`
 	MaxConnections  int      `json:"max_connections,omitempty"`
 	UnavailablePage string   `json:"unavailable_page,omitempty"`
+	// AllowedIPs restricts who may reach the tunnel. Each entry is either a
+	// plain IP (v4 or v6) or a CIDR (e.g. "10.0.0.0/8"). Empty list = allow all.
+	AllowedIPs []string `json:"allowed_ips,omitempty"`
+	// CaptureBodies enables request/response body capture in the inspector
+	// (capped at 256 KB, off-by-default for privacy and memory reasons).
+	CaptureBodies bool `json:"capture_bodies,omitempty"`
 }
 
 type ForwardAckPayload struct {
@@ -91,7 +104,20 @@ type InspectorEventPayload struct {
 	OS              string            `json:"os,omitempty"`
 	RequestHeaders  map[string]string `json:"request_headers,omitempty"`
 	ResponseHeaders map[string]string `json:"response_headers,omitempty"`
+	// Captured bodies (only populated when the forward has CaptureBodies set).
+	// Bodies are stored as UTF-8 strings; binary content is base64-encoded with
+	// the BodyEncoding fields set to "base64". Both bodies are capped at
+	// MaxCapturedBodyBytes; truncation is signaled via the Truncated flags.
+	RequestBody              string `json:"request_body,omitempty"`
+	RequestBodyEncoding      string `json:"request_body_encoding,omitempty"`
+	RequestBodyTruncated     bool   `json:"request_body_truncated,omitempty"`
+	ResponseBody             string `json:"response_body,omitempty"`
+	ResponseBodyEncoding     string `json:"response_body_encoding,omitempty"`
+	ResponseBodyTruncated    bool   `json:"response_body_truncated,omitempty"`
 }
+
+// MaxCapturedBodyBytes is the per-body cap applied when CaptureBodies is on.
+const MaxCapturedBodyBytes = 256 * 1024
 
 // StreamHeader is written at the start of every server-opened data stream.
 type StreamHeader struct {

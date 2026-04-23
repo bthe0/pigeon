@@ -2,7 +2,9 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
@@ -13,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bthe0/pigeon/internal/proto"
 	"golang.org/x/crypto/acme/autocert"
@@ -51,12 +54,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		host = h
 	}
 
-	v, ok := s.sessions.Load("http:" + host)
-	if !ok {
+	fwd := s.lookupHTTPForward(host)
+	if fwd == nil {
 		writeStatusPage(w, http.StatusBadGateway, "default", "tunnel not found", "No active tunnel is currently registered for "+host+".")
 		return
 	}
-	fwd := v.(*forward)
+
+	clientAddr := clientIP(r.RemoteAddr, r.Header)
+	if !fwd.allows(clientAddr) {
+		writeStatusPage(w, http.StatusForbidden, pageVariant(fwd.unavailablePage), "Forbidden", "Your IP is not permitted to access this tunnel.")
+		return
+	}
 
 	isTLS := s.requestIsSecure(r)
 
@@ -109,15 +117,32 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	start := time.Now()
 	requestHeaders := headerToMap(r.Header)
-	clientAddr := clientIP(r.RemoteAddr, r.Header)
 	browser, osName := browserAndOS(r.UserAgent())
 	geo := s.lookupGeo(clientAddr)
+
+	// Capture request body up to the cap. We always read into the buffer first
+	// then re-attach a reader that replays the captured bytes followed by the
+	// remaining stream — preserves streaming for bodies larger than the cap.
+	var reqBody []byte
+	var reqTruncated bool
+	if fwd.captureBodies && r.Body != nil {
+		reqBody, reqTruncated, r.Body = captureBody(r.Body, proto.MaxCapturedBodyBytes)
+	}
+
+	// The host the upstream reverse-proxy URL points at is irrelevant — the
+	// connTransport sends the request directly down the yamux stream — but
+	// httputil insists on a non-empty host, so reuse the request's host.
 	target, _ := url.Parse("http://" + host)
 	rp := httputil.NewSingleHostReverseProxy(target)
 	rp.Transport = &connTransport{conn: stream}
 	var responseHeaders map[string]string
+	var respCapture *bodyCapture
 	rp.ModifyResponse = func(resp *http.Response) error {
 		responseHeaders = headerToMap(resp.Header)
+		if fwd.captureBodies && resp.Body != nil {
+			respCapture = &bodyCapture{}
+			resp.Body = newCappedTeeReader(resp.Body, respCapture, proto.MaxCapturedBodyBytes)
+		}
 		return nil
 	}
 	rp.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, err error) {
@@ -126,34 +151,132 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cw := &captureWriter{ResponseWriter: w, status: http.StatusOK}
 	rp.ServeHTTP(cw, r)
 
-	fwd.session.writeMessage(proto.Message{
-		Type: proto.MsgInspectorEvent,
-		Payload: proto.InspectorEventPayload{
-			// Nanosecond precision disambiguates rapid-fire requests on the
-			// dashboard — the client derives a stable row ID from Time and
-			// would otherwise collide when N requests land in the same second.
-			Time:            time.Now().Format(time.RFC3339Nano),
-			ForwardID:       fwd.id,
-			Domain:          fwd.publicAddr,
-			RemoteAddr:      clientAddr,
-			Method:          r.Method,
-			Path:            r.URL.RequestURI(),
-			Status:          cw.status,
-			DurationMs:      int(time.Since(start).Milliseconds()),
-			Bytes:           cw.bytes,
-			City:            geo.City,
-			Country:         geo.Country,
-			CountryCode:     geo.CountryCode,
-			Latitude:        geo.Latitude,
-			Longitude:       geo.Longitude,
-			Browser:         browser,
-			OS:              osName,
-			RequestHeaders:  requestHeaders,
-			ResponseHeaders: responseHeaders,
-		},
-	})
+	event := proto.InspectorEventPayload{
+		// Nanosecond precision disambiguates rapid-fire requests on the
+		// dashboard — the client derives a stable row ID from Time and
+		// would otherwise collide when N requests land in the same second.
+		Time:            time.Now().Format(time.RFC3339Nano),
+		ForwardID:       fwd.id,
+		Domain:          fwd.publicAddr,
+		RemoteAddr:      clientAddr,
+		Method:          r.Method,
+		Path:            r.URL.RequestURI(),
+		Status:          cw.status,
+		DurationMs:      int(time.Since(start).Milliseconds()),
+		Bytes:           cw.bytes,
+		City:            geo.City,
+		Country:         geo.Country,
+		CountryCode:     geo.CountryCode,
+		Latitude:        geo.Latitude,
+		Longitude:       geo.Longitude,
+		Browser:         browser,
+		OS:              osName,
+		RequestHeaders:  requestHeaders,
+		ResponseHeaders: responseHeaders,
+	}
+	if fwd.captureBodies {
+		event.RequestBody, event.RequestBodyEncoding = encodeBody(reqBody)
+		event.RequestBodyTruncated = reqTruncated
+		if respCapture != nil {
+			event.ResponseBody, event.ResponseBodyEncoding = encodeBody(respCapture.buf.Bytes())
+			event.ResponseBodyTruncated = respCapture.truncated
+		}
+	}
+	fwd.session.writeMessage(proto.Message{Type: proto.MsgInspectorEvent, Payload: event})
 
 	s.logTraffic(fwd, r.RemoteAddr, "HTTP", fmt.Sprintf("%s %s %d %dms", r.Method, r.URL.Path, cw.status, time.Since(start).Milliseconds()), cw.bytes)
+}
+
+// lookupHTTPForward resolves host to a forward. Exact matches win; otherwise
+// we fall back to one-level wildcard matches (`*.suffix`), which only fire
+// when host has the form `<one-label>.<suffix>` (no nested subdomains).
+func (s *Server) lookupHTTPForward(host string) *forward {
+	if v, ok := s.sessions.Load("http:" + host); ok {
+		return v.(*forward)
+	}
+	idx := strings.IndexByte(host, '.')
+	if idx <= 0 {
+		return nil
+	}
+	suffix := host[idx+1:]
+	if v, ok := s.wildcards.Load(suffix); ok {
+		return v.(*forward)
+	}
+	return nil
+}
+
+// captureBody reads up to limit bytes from rc into a buffer and returns a
+// replacement ReadCloser that replays the captured bytes followed by the
+// remaining stream, so the downstream reader sees the full body.
+func captureBody(rc io.ReadCloser, limit int) (captured []byte, truncated bool, replacement io.ReadCloser) {
+	buf := make([]byte, limit)
+	n, err := io.ReadFull(rc, buf)
+	switch err {
+	case nil:
+		// We filled the buffer exactly — there might still be more on the wire.
+		truncated = true
+		captured = buf[:n]
+		// Drain the rest into a separate buffer so the proxy still sees the
+		// full body. Bounded by the request as a whole, not by us.
+		rest, _ := io.ReadAll(rc)
+		_ = rc.Close()
+		replacement = io.NopCloser(io.MultiReader(bytes.NewReader(captured), bytes.NewReader(rest)))
+	case io.ErrUnexpectedEOF, io.EOF:
+		captured = buf[:n]
+		_ = rc.Close()
+		replacement = io.NopCloser(bytes.NewReader(captured))
+	default:
+		captured = buf[:n]
+		_ = rc.Close()
+		replacement = io.NopCloser(bytes.NewReader(captured))
+	}
+	return
+}
+
+// bodyCapture accumulates the first N bytes of a stream while passing the
+// rest through unchanged. Used on the response side via newCappedTeeReader.
+type bodyCapture struct {
+	buf       bytes.Buffer
+	truncated bool
+}
+
+type cappedTeeReader struct {
+	src io.ReadCloser
+	cap *bodyCapture
+	max int
+}
+
+func newCappedTeeReader(src io.ReadCloser, cap *bodyCapture, max int) io.ReadCloser {
+	return &cappedTeeReader{src: src, cap: cap, max: max}
+}
+
+func (t *cappedTeeReader) Read(p []byte) (int, error) {
+	n, err := t.src.Read(p)
+	if n > 0 && t.cap.buf.Len() < t.max {
+		room := t.max - t.cap.buf.Len()
+		if n <= room {
+			t.cap.buf.Write(p[:n])
+		} else {
+			t.cap.buf.Write(p[:room])
+			t.cap.truncated = true
+		}
+	}
+	return n, err
+}
+
+func (t *cappedTeeReader) Close() error { return t.src.Close() }
+
+// encodeBody returns the captured body as either a UTF-8 string (encoding "")
+// or a base64-encoded blob (encoding "base64") when the bytes don't form
+// valid UTF-8 or contain NULs typical of binary content.
+func encodeBody(b []byte) (string, string) {
+	if len(b) == 0 {
+		return "", ""
+	}
+	if utf8.Valid(b) && !bytes.ContainsRune(b, 0) {
+		return string(b), ""
+	}
+	return base64.StdEncoding.EncodeToString(b), "base64"
 }
 
 // connTransport implements http.RoundTripper using an existing net.Conn.

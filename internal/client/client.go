@@ -1,12 +1,15 @@
 package client
 
 import (
+	"bufio"
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -204,7 +207,77 @@ func (c *Client) handleStream(stream net.Conn) {
 		c.handleTCPStream(stream, rule, hdr, true)
 	case proto.ProtoUDP:
 		c.handleUDPStream(stream, rule)
+	case proto.ProtoStatic:
+		c.handleStaticStream(stream, rule, hdr)
 	}
+}
+
+// handleStaticStream serves files from rule.StaticRoot in response to a single
+// HTTP request read off the stream. The stream is the request/response
+// connection — read one request, write one response, then close. We deliberately
+// do not loop: the server opens a fresh stream per request anyway.
+func (c *Client) handleStaticStream(stream net.Conn, rule *ForwardRule, hdr proto.StreamHeader) {
+	if rule.StaticRoot == "" {
+		log.Printf("[%s] static forward has no static_root", rule.ID)
+		return
+	}
+	br := bufio.NewReader(stream)
+	req, err := http.ReadRequest(br)
+	if err != nil {
+		return
+	}
+	defer req.Body.Close()
+
+	cw := &countingResponseWriter{header: make(http.Header)}
+	fs := http.FileServer(http.Dir(rule.StaticRoot))
+	fs.ServeHTTP(cw, req)
+
+	resp := http.Response{
+		Status:        http.StatusText(cw.statusCode()),
+		StatusCode:    cw.statusCode(),
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Header:        cw.header,
+		Body:          io.NopCloser(&cw.body),
+		ContentLength: int64(cw.body.Len()),
+		Close:         true,
+	}
+	if resp.Header.Get("Content-Type") == "" {
+		resp.Header.Set("Content-Type", "application/octet-stream")
+	}
+	if err := resp.Write(stream); err != nil {
+		log.Printf("[%s] static write: %v", rule.ID, err)
+	}
+	c.logTraffic(rule, hdr.RemoteAddr, "STATIC", fmt.Sprintf("%s %s %d", req.Method, req.URL.Path, cw.statusCode()), cw.body.Len())
+}
+
+// countingResponseWriter buffers a complete HTTP response for static serving.
+// FileServer expects a real ResponseWriter; we capture status/headers/body so
+// the daemon can write a single self-contained response back over the stream.
+type countingResponseWriter struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func (w *countingResponseWriter) Header() http.Header { return w.header }
+func (w *countingResponseWriter) WriteHeader(code int) {
+	if w.status == 0 {
+		w.status = code
+	}
+}
+func (w *countingResponseWriter) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.body.Write(p)
+}
+func (w *countingResponseWriter) statusCode() int {
+	if w.status == 0 {
+		return http.StatusOK
+	}
+	return w.status
 }
 
 func (c *Client) handleTCPStream(stream net.Conn, rule *ForwardRule, hdr proto.StreamHeader, useTLS bool) {

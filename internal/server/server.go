@@ -51,7 +51,8 @@ type Config struct {
 // Server is the pigeon tunnel server.
 type Server struct {
 	cfg            Config
-	sessions       sync.Map // domain/port-key → *session
+	sessions       sync.Map // exact-host key ("http:" + domain) → *forward
+	wildcards      sync.Map // suffix domain (host portion after "*.") → *forward
 	forwards       sync.Map // forward id → *forward
 	logger         *log.Logger
 	logFile        io.WriteCloser

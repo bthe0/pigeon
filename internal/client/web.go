@@ -1,10 +1,14 @@
 package client
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"crypto/tls"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -308,6 +312,10 @@ func StartWebInterface(addr string, openBrowser bool) error {
 		json.NewEncoder(w).Encode(entries)
 	}))))
 
+	mux.HandleFunc("/api/inspector/replay", auth(noCache(allowMethod(http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
+		handleReplay(w, r, store)
+	}))))
+
 	// /api/forwards supports POST; /api/forwards/{id} supports DELETE and PUT.
 	// Register both with method-aware patterns so the mux auto-emits 405 for
 	// unsupported methods.
@@ -407,3 +415,170 @@ func StartWebInterface(addr string, openBrowser bool) error {
 func requestIsSecure(r *http.Request) bool {
 	return r.TLS != nil
 }
+
+// replayRequest is the dashboard's POST body. It mirrors the inspector entry
+// fields the user wants to fire again. Domain identifies the target tunnel;
+// the request loops back through the public URL so it shows up in the
+// inspector again (and exercises any auth / IP rules in front of the tunnel).
+type replayRequest struct {
+	ForwardID    string            `json:"forward_id"`
+	Domain       string            `json:"domain"`
+	Method       string            `json:"method"`
+	Path         string            `json:"path"`
+	Headers      map[string]string `json:"headers,omitempty"`
+	Body         string            `json:"body,omitempty"`
+	BodyEncoding string            `json:"body_encoding,omitempty"`
+	HTTPPassword string            `json:"http_password,omitempty"` // optional override for password-protected tunnels
+}
+
+type replayResponse struct {
+	Status      int               `json:"status"`
+	DurationMs  int               `json:"duration_ms"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	Body        string            `json:"body,omitempty"`
+	Truncated   bool              `json:"truncated,omitempty"`
+	Error       string            `json:"error,omitempty"`
+}
+
+func handleReplay(w http.ResponseWriter, r *http.Request, store *configStore) {
+	var p replayRequest
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if p.Method == "" || p.Path == "" {
+		http.Error(w, "method and path required", http.StatusBadRequest)
+		return
+	}
+
+	// Locate the tunnel so we can resolve its public URL and figure out
+	// whether to dial https or http. Replays must target a known forward —
+	// firing arbitrary requests through the dashboard would turn it into an
+	// open proxy.
+	cfg := store.Load()
+	if cfg == nil {
+		http.Error(w, "not initialised", http.StatusInternalServerError)
+		return
+	}
+	rule := findReplayTarget(cfg, p)
+	if rule == nil {
+		http.Error(w, "tunnel not found", http.StatusNotFound)
+		return
+	}
+	publicHost := rule.PublicAddr
+	if publicHost == "" {
+		publicHost = rule.Domain
+	}
+	if publicHost == "" {
+		http.Error(w, "tunnel has no public address yet", http.StatusConflict)
+		return
+	}
+	// Wildcard tunnels (*.foo.example.com) need a concrete host. Use the
+	// caller-supplied Domain when it matches the wildcard suffix; otherwise
+	// substitute "replay" as the leading label.
+	if strings.HasPrefix(publicHost, "*.") {
+		suffix := strings.TrimPrefix(publicHost, "*.")
+		if p.Domain != "" && strings.HasSuffix(p.Domain, "."+suffix) {
+			publicHost = p.Domain
+		} else {
+			publicHost = "replay." + suffix
+		}
+	}
+
+	scheme := "https"
+	if rule.Expose == "http" {
+		scheme = "http"
+	}
+	url := scheme + "://" + publicHost + p.Path
+
+	var body io.Reader
+	if p.Body != "" {
+		switch p.BodyEncoding {
+		case "base64":
+			b, err := base64.StdEncoding.DecodeString(p.Body)
+			if err != nil {
+				http.Error(w, "invalid base64 body", http.StatusBadRequest)
+				return
+			}
+			body = bytes.NewReader(b)
+		default:
+			body = strings.NewReader(p.Body)
+		}
+	}
+
+	req, err := http.NewRequestWithContext(r.Context(), p.Method, url, body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	for k, v := range p.Headers {
+		// These hop-by-hop / framing headers must reflect the new transport,
+		// not the captured ones — leaving them in causes content-length
+		// mismatches and TE conflicts.
+		switch strings.ToLower(k) {
+		case "host", "content-length", "transfer-encoding", "connection":
+			continue
+		}
+		req.Header.Set(k, v)
+	}
+	if p.HTTPPassword != "" {
+		req.SetBasicAuth("pigeon", p.HTTPPassword)
+	}
+
+	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.LocalDev}} //nolint:gosec
+	client := &http.Client{Timeout: 30 * time.Second, Transport: tr}
+
+	start := time.Now()
+	resp, err := client.Do(req)
+	dur := int(time.Since(start).Milliseconds())
+	if err != nil {
+		json.NewEncoder(w).Encode(replayResponse{DurationMs: dur, Error: err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	const replayBodyCap = proto.MaxCapturedBodyBytes
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, replayBodyCap+1))
+	truncated := false
+	if len(bodyBytes) > replayBodyCap {
+		bodyBytes = bodyBytes[:replayBodyCap]
+		truncated = true
+	}
+	out := replayResponse{
+		Status:     resp.StatusCode,
+		DurationMs: dur,
+		Headers:    make(map[string]string, len(resp.Header)),
+		Truncated:  truncated,
+	}
+	for k, v := range resp.Header {
+		out.Headers[k] = strings.Join(v, ", ")
+	}
+	out.Body = string(bodyBytes)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
+}
+
+func findReplayTarget(cfg *Config, p replayRequest) *ForwardRule {
+	for i := range cfg.Forwards {
+		f := &cfg.Forwards[i]
+		if !f.Protocol.IsHTTPLike() {
+			continue
+		}
+		if p.ForwardID != "" && f.ID == p.ForwardID {
+			return f
+		}
+		if p.Domain == "" {
+			continue
+		}
+		if f.PublicAddr == p.Domain || f.Domain == p.Domain {
+			return f
+		}
+		// Wildcard match: *.suffix matches one-label-deep host like leaf.suffix.
+		host := strings.TrimPrefix(f.PublicAddr, "*.")
+		if strings.HasPrefix(f.PublicAddr, "*.") && strings.HasSuffix(p.Domain, "."+host) {
+			return f
+		}
+	}
+	return nil
+}
+

@@ -581,7 +581,8 @@ export function App() {
         let pubUrl = '';
         let urlScheme = 'https';
         const expose = f.expose || 'both';
-        if (f.protocol === 'http' || f.protocol === 'https') {
+        const httpLike = f.protocol === 'http' || f.protocol === 'https' || f.protocol === 'static';
+        if (httpLike) {
           // Only show a URL the server has actually assigned. Don't guess from
           // forward_id — the server picks a random 8-char subdomain unrelated
           // to the id, so a speculative fallback would point at a non-existent
@@ -599,7 +600,7 @@ export function App() {
           id: f.id,
           name: f.id,
           proto: f.protocol,
-          localPort: f.local_addr,
+          localPort: f.protocol === 'static' ? (f.static_root || '') : f.local_addr,
           publicUrl: pubUrl,
           urlScheme,
           isLocal,
@@ -611,6 +612,9 @@ export function App() {
           httpPassword: f.http_password || '',
           maxConnections: f.max_connections || 0,
           unavailablePage: f.unavailable_page || 'default',
+          allowedIPs: f.allowed_ips || [],
+          captureBodies: !!f.capture_bodies,
+          staticRoot: f.static_root || '',
           region: 'auto',
           requests: f.requests || 0,
           latency: f.disabled ? null : metricFromID(f.id, 8, 95),

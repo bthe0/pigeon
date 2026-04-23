@@ -23,8 +23,11 @@ type ForwardRule struct {
 	TLSSkipVerify   bool           `json:"tls_skip_verify,omitempty"` // allow self-signed certs on local HTTPS service
 	MaxConnections  int            `json:"max_connections,omitempty"`
 	UnavailablePage string         `json:"unavailable_page,omitempty"`
-	RequestCount    int64          `json:"requests"` // in-memory only
-	ByteCount       int64          `json:"bytes"`    // in-memory only
+	AllowedIPs      []string       `json:"allowed_ips,omitempty"`    // IPs / CIDRs permitted to reach the tunnel
+	CaptureBodies   bool           `json:"capture_bodies,omitempty"` // capture request/response bodies in the inspector
+	StaticRoot      string         `json:"static_root,omitempty"`    // filesystem path for static forwards
+	RequestCount    int64          `json:"requests"`                 // in-memory only
+	ByteCount       int64          `json:"bytes"`                    // in-memory only
 }
 
 type Config struct {
@@ -182,6 +185,8 @@ func (r ForwardRule) ToPayload() proto.ForwardPayload {
 		HTTPPassword:    r.HTTPPassword,
 		MaxConnections:  r.MaxConnections,
 		UnavailablePage: r.UnavailablePage,
+		AllowedIPs:      append([]string(nil), r.AllowedIPs...),
+		CaptureBodies:   r.CaptureBodies,
 	}
 }
 
@@ -217,13 +222,17 @@ func (cfg *Config) normalizeForward(rule *ForwardRule) {
 	if cfg.BaseDomain == "" {
 		return
 	}
-	if rule.Protocol != proto.ProtoHTTP && rule.Protocol != proto.ProtoHTTPS {
+	if !rule.Protocol.IsHTTPLike() {
 		return
 	}
-	if rule.Domain != "" && !strings.Contains(rule.Domain, ".") {
-		rule.Domain = rule.Domain + "." + cfg.BaseDomain
+	// Subdomain shorthand expansion. The leading "*." is preserved so wildcard
+	// inputs like "*.preview" become "*.preview.<base>" cleanly.
+	expand := func(s string) string {
+		if s == "" || strings.Contains(strings.TrimPrefix(s, "*."), ".") {
+			return s
+		}
+		return s + "." + cfg.BaseDomain
 	}
-	if rule.PublicAddr != "" && !strings.Contains(rule.PublicAddr, ".") {
-		rule.PublicAddr = rule.PublicAddr + "." + cfg.BaseDomain
-	}
+	rule.Domain = expand(rule.Domain)
+	rule.PublicAddr = expand(rule.PublicAddr)
 }
