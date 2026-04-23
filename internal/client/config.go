@@ -138,9 +138,13 @@ func SaveConfig(cfg *Config) error {
 
 func (cfg *Config) AddForward(r ForwardRule) error {
 	cfg.normalizeForward(&r)
+	// Only reject on ID collision — IDs are the primary key for lookups and
+	// must be unique. Content overlap (same local address, different subdomain,
+	// or two auto-assigned http forwards pointing at the same port) is
+	// explicitly allowed so the user can expose one service under multiple URLs.
 	for _, f := range cfg.Forwards {
-		if f.ID == r.ID || (f.Protocol == r.Protocol && f.LocalAddr == r.LocalAddr && f.Domain == r.Domain && f.RemotePort == r.RemotePort) {
-			return fmt.Errorf("duplicate forward")
+		if f.ID == r.ID {
+			return fmt.Errorf("duplicate forward id %q", r.ID)
 		}
 	}
 	cfg.Forwards = append(cfg.Forwards, r)

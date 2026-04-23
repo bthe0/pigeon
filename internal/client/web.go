@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -48,35 +49,65 @@ func sessionValue(password string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// configStore caches the active config in memory so every API request doesn't
-// re-read ~/.pigeon/config.json from disk. Saves go through Update which
-// persists to disk and refreshes the cached copy atomically.
+// configStore caches the active config in memory and auto-refreshes on an
+// mtime change so writes made by the daemon (via OnAddr → SaveConfig) become
+// visible to the web handlers without a server restart.
 //
-// The store tolerates a missing config file — cfg is simply nil until either
-// an Update call writes one or the user runs `pigeon init`. Handlers must
+// The store tolerates a missing config file — cfg is nil until either an
+// Update call writes one or the user runs `pigeon init`. Handlers must
 // nil-check before dereferencing.
 type configStore struct {
-	mu  sync.RWMutex
-	cfg *Config
+	mu    sync.RWMutex
+	cfg   *Config
+	mtime time.Time
 }
 
 func newConfigStore() *configStore {
 	s := &configStore{}
-	if cfg, err := LoadConfig(); err == nil {
-		s.cfg = cfg
-	}
+	s.Load() // populate cfg + mtime if the file exists
 	return s
 }
 
+// Load returns the active config. If the file on disk has a newer mtime than
+// the cached copy, the cache is refreshed before returning. This keeps the
+// web UI in sync with daemon-side writes (server-assigned public addresses,
+// in particular) without requiring an explicit plumb.
 func (s *configStore) Load() *Config {
+	path, err := ConfigPath()
+	if err != nil {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		return s.cfg
+	}
+
+	info, statErr := os.Stat(path)
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.cfg
+	cached := s.cfg
+	cachedMtime := s.mtime
+	s.mu.RUnlock()
+
+	if statErr != nil {
+		return cached
+	}
+	if cached != nil && !info.ModTime().After(cachedMtime) {
+		return cached
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		return cached
+	}
+	s.mu.Lock()
+	s.cfg = cfg
+	s.mtime = info.ModTime()
+	s.mu.Unlock()
+	return cfg
 }
 
 // Update mutates the cached config via fn, persists to disk, and replaces the
 // cached pointer. If no config is loaded yet, fn runs against an empty
-// Config — letting the first Update initialise the file.
+// Config — letting the first Update initialise the file. The mtime is bumped
+// so the next Load sees the fresh copy without re-reading disk.
 func (s *configStore) Update(fn func(*Config) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -94,6 +125,11 @@ func (s *configStore) Update(fn func(*Config) error) error {
 		return err
 	}
 	s.cfg = &working
+	if path, perr := ConfigPath(); perr == nil {
+		if info, serr := os.Stat(path); serr == nil {
+			s.mtime = info.ModTime()
+		}
+	}
 	return nil
 }
 
@@ -209,9 +245,11 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			return
 		}
 		if p.Password == "" || p.Password != cfg.DashboardPassword {
+			log.Printf("dashboard login rejected from %s", r.RemoteAddr)
 			http.Error(w, "invalid password", http.StatusUnauthorized)
 			return
 		}
+		log.Printf("dashboard login accepted from %s", r.RemoteAddr)
 
 		http.SetCookie(w, &http.Cookie{
 			Name:     "pigeon_session",
@@ -239,7 +277,7 @@ func StartWebInterface(addr string, openBrowser bool) error {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})))
 
-	mux.HandleFunc("/api/logs", auth(noCache(allowMethod(http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/logs", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
 		filter := r.URL.Query().Get("filter")
 		logs, err := FetchRecentLogs(filter, 100)
 		if err != nil {
@@ -248,7 +286,16 @@ func StartWebInterface(addr string, openBrowser bool) error {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(logs)
-	}))))
+	})))
+
+	mux.HandleFunc("DELETE /api/logs", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
+		if err := ClearLogs(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("logs cleared via dashboard")
+		w.WriteHeader(http.StatusNoContent)
+	})))
 
 	mux.HandleFunc("/api/inspector", auth(noCache(allowMethod(http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
 		filter := r.URL.Query().Get("filter")
@@ -277,6 +324,7 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
+		log.Printf("forward added via web: %s %s → %s", rule.ID, rule.Protocol, rule.LocalAddr)
 		DaemonReload()
 		w.WriteHeader(http.StatusCreated)
 	})))
@@ -297,6 +345,7 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			http.Error(w, err.Error(), status)
 			return
 		}
+		log.Printf("forward removed via web: %s", id)
 		DaemonReload()
 		w.WriteHeader(http.StatusOK)
 	})))
@@ -329,6 +378,7 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			http.Error(w, err.Error(), status)
 			return
 		}
+		log.Printf("forward updated via web: %s (%s → %s)", id, rule.Protocol, rule.LocalAddr)
 		DaemonReload()
 		w.WriteHeader(http.StatusOK)
 	})))

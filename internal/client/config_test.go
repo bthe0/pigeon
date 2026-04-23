@@ -64,13 +64,20 @@ func TestAddForward_DuplicateID(t *testing.T) {
 	}
 }
 
-func TestAddForward_DuplicateContent(t *testing.T) {
+// Two rules pointing at the same local service are explicitly allowed —
+// users can expose one backend under multiple auto-assigned subdomains.
+func TestAddForward_DuplicateContent_Allowed(t *testing.T) {
 	cfg := &client.Config{}
 	r1 := client.ForwardRule{ID: "id1", Protocol: proto.ProtoHTTP, LocalAddr: "localhost:80", Domain: "x.example.com"}
 	r2 := client.ForwardRule{ID: "id2", Protocol: proto.ProtoHTTP, LocalAddr: "localhost:80", Domain: "x.example.com"}
-	cfg.AddForward(r1)
-	if err := cfg.AddForward(r2); err == nil {
-		t.Fatal("expected duplicate content error, got nil")
+	if err := cfg.AddForward(r1); err != nil {
+		t.Fatalf("first add: %v", err)
+	}
+	if err := cfg.AddForward(r2); err != nil {
+		t.Errorf("second add with same content should be allowed, got %v", err)
+	}
+	if len(cfg.Forwards) != 2 {
+		t.Errorf("expected 2 forwards, got %d", len(cfg.Forwards))
 	}
 }
 

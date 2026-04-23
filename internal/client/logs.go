@@ -171,6 +171,40 @@ func latestNDJSON(dir string) string {
 	return entries[len(entries)-1]
 }
 
+// ClearLogs truncates daily traffic ndjson files and daemon.log to zero
+// bytes. The Request Inspector has its own separate log files (inspector-*.ndjson)
+// which are intentionally left alone — only the System Logs view drives this.
+// Open file descriptors held by the running daemon stay valid: subsequent
+// log writes continue to append from position 0.
+func ClearLogs() error {
+	dir, err := LogDir()
+	if err != nil {
+		return err
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, "*.ndjson"))
+	if err != nil {
+		return err
+	}
+	var targets []string
+	for _, p := range matches {
+		// Skip inspector files — those belong to the Request Inspector view.
+		if strings.HasPrefix(filepath.Base(p), "inspector") {
+			continue
+		}
+		targets = append(targets, p)
+	}
+	targets = append(targets, filepath.Join(dir, "daemon.log"))
+	for _, p := range targets {
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		if err := os.Truncate(p, 0); err != nil {
+			return fmt.Errorf("truncate %s: %w", p, err)
+		}
+	}
+	return nil
+}
+
 // FetchRecentLogs returns recent JSON logs as structs.
 func FetchRecentLogs(filter string, limit int) ([]proto.TrafficLogEntry, error) {
 	logDir, err := LogDir()
@@ -182,9 +216,17 @@ func FetchRecentLogs(filter string, limit int) ([]proto.TrafficLogEntry, error) 
 
 	latest := latestNDJSON(logDir)
 	if latest != "" {
-		var keep func(*proto.TrafficLogEntry) bool
-		if filter != "" {
-			keep = func(e *proto.TrafficLogEntry) bool { return e.ForwardID == filter }
+		keep := func(e *proto.TrafficLogEntry) bool {
+			// Drop rows written by older pigeon versions that carry no
+			// protocol and no action — they render as blank "?" lines in the
+			// dashboard and add no signal over the bare timestamp.
+			if e.Protocol == "" && e.Action == "" {
+				return false
+			}
+			if filter != "" && e.ForwardID != filter {
+				return false
+			}
+			return true
 		}
 		more, err := tailNDJSON[proto.TrafficLogEntry]([]string{latest}, keep, 0)
 		if err != nil {

@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"os"
@@ -151,6 +152,15 @@ func DaemonRun(cfg *Config) {
 	pidFile, _ := PIDFile()
 	writePID(pidFile, os.Getpid())
 	defer os.Remove(pidFile)
+
+	// Tee the default logger to daemon.log so the System Logs view in the
+	// dashboard has content even when the daemon is started inline (pigeon dev)
+	// where stdout/stderr are bound to the terminal rather than the log file.
+	if logDir, err := LogDir(); err == nil {
+		if f, err := os.OpenFile(filepath.Join(logDir, "daemon.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600); err == nil {
+			log.SetOutput(io.MultiWriter(os.Stderr, f))
+		}
+	}
 
 	// Start web interface in background
 	go func() {

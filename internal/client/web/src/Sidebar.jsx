@@ -1,4 +1,3 @@
-import React from 'react';
 import { Icon, Icons } from './Icons';
 
 export function Sidebar({ active, setActive, onLogout }) {
@@ -10,14 +9,16 @@ export function Sidebar({ active, setActive, onLogout }) {
   ];
   return (
     <div className="sidebar" style={{ width: 200, background: 'var(--panel)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
-      {/* Logo */}
-      <div className="sidebar-header" style={{ padding: '20px 16px 16px', borderBottom: '1px solid var(--border)' }}>
+      {/* Logo — click returns to the Tunnels home view. */}
+      <button onClick={() => setActive('tunnels')} className="sidebar-header"
+        aria-label="Go to Tunnels home"
+        style={{ padding: '20px 16px 16px', textAlign: 'left', background: 'none', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit', width: '100%' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <img src="/logo.png" alt="Pigeon logo" style={{ width: 28, height: 28, objectFit: 'contain', flexShrink: 0 }} />
           <span style={{ fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 14, letterSpacing: '.06em', color: '#fff' }}>pigeon</span>
         </div>
         <div style={{ marginTop: 4, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>tunnel agent connected</div>
-      </div>
+      </button>
 
       <div className="sidebar-system" style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>
         <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 500 }}>System</div>

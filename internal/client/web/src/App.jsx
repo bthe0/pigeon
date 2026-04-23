@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Icon, Icons } from './Icons';
 import { StatusDot } from './Shared';
 import { Sidebar } from './Sidebar';
@@ -76,20 +76,257 @@ function agoFromTime(timeString) {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
+// ── TunnelCharts ─────────────────────────────────────────────────────────────
+// Lightweight SVG charts rendered from the last ~100 inspector entries for a
+// tunnel. Designed to give at-a-glance insight — request rate, HTTP-status
+// mix, and latency timeline — without pulling in a chart library.
+
+const STATUS_CLASS = (s) =>
+  s >= 500 ? '5xx' :
+  s >= 400 ? '4xx' :
+  s >= 300 ? '3xx' :
+  s >= 200 ? '2xx' : '1xx';
+
+const STATUS_CLASS_COLORS = {
+  '2xx': '#00e87a',
+  '3xx': '#4d9fff',
+  '4xx': '#f5c542',
+  '5xx': '#ff4d4d',
+  '1xx': '#9ba39c',
+};
+
+function TunnelCharts({ entries }) {
+  if (!entries || entries.length === 0) {
+    return (
+      <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-dim)', fontSize:12, padding:24, textAlign:'center' }}>
+        No request data yet. Once traffic hits the tunnel, charts will appear here.
+      </div>
+    );
+  }
+
+  const parsed = entries.map(e => ({
+    ts: new Date(e.time).getTime(),
+    status: e.status || 0,
+    ms: e.duration_ms || 0,
+    bytes: e.bytes || 0,
+    path: e.path || '/',
+    method: e.method || 'GET',
+  })).filter(e => e.ts > 0).sort((a, b) => a.ts - b.ts);
+
+  const now = Date.now();
+  const total = parsed.length;
+  const avgLatency = parsed.reduce((s, e) => s + e.ms, 0) / total;
+  const p95Latency = percentile(parsed.map(e => e.ms), 95);
+  const errors = parsed.filter(e => e.status >= 400).length;
+  const errorRate = total > 0 ? (errors / total) * 100 : 0;
+  const totalBytes = parsed.reduce((s, e) => s + e.bytes, 0);
+
+  // Bucket into 30-second bins covering the last 10 minutes so the sparkline
+  // renders even when the traffic stream is bursty.
+  const bins = 20;
+  const windowMs = 10 * 60 * 1000;
+  const binMs = windowMs / bins;
+  const start = now - windowMs;
+  const perBin = Array.from({ length: bins }, () => ({ count: 0, errors: 0 }));
+  parsed.forEach(e => {
+    if (e.ts < start) return;
+    const idx = Math.min(bins - 1, Math.floor((e.ts - start) / binMs));
+    perBin[idx].count++;
+    if (e.status >= 400) perBin[idx].errors++;
+  });
+  const maxCount = Math.max(1, ...perBin.map(b => b.count));
+
+  // Status-class breakdown.
+  const classes = { '2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0, '1xx': 0 };
+  parsed.forEach(e => { classes[STATUS_CLASS(e.status)] = (classes[STATUS_CLASS(e.status)] || 0) + 1; });
+  const classEntries = Object.entries(classes).filter(([, v]) => v > 0);
+
+  // Top paths by count.
+  const byPath = {};
+  parsed.forEach(e => {
+    const key = `${e.method} ${e.path}`;
+    byPath[key] = (byPath[key] || 0) + 1;
+  });
+  const topPaths = Object.entries(byPath).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  return (
+    <div style={{ flex:1, overflowY:'auto', padding:16, display:'flex', flexDirection:'column', gap:16 }}>
+      {/* Stat cards */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:8 }}>
+        <StatCard label="Requests"    value={total.toLocaleString()} />
+        <StatCard label="Avg Latency" value={`${Math.round(avgLatency)}ms`} />
+        <StatCard label="p95 Latency" value={`${Math.round(p95Latency)}ms`} accent={p95Latency > 500 ? '#f5c542' : undefined} />
+        <StatCard label="Error Rate"  value={`${errorRate.toFixed(1)}%`}  accent={errorRate > 5 ? '#ff4d4d' : '#00e87a'} />
+      </div>
+
+      {/* Request rate (per 30s, last 10min) */}
+      <ChartCard title="Requests · last 10 min" right={`${formatBytesShort(totalBytes)} transferred`}>
+        <RequestRateChart bins={perBin} max={maxCount} />
+      </ChartCard>
+
+      {/* Latency timeline */}
+      <ChartCard title="Latency" right={`avg ${Math.round(avgLatency)}ms · p95 ${Math.round(p95Latency)}ms`}>
+        <LatencyChart points={parsed.slice(-60)} />
+      </ChartCard>
+
+      {/* Status mix */}
+      <ChartCard title="Status codes" right={`${total} samples`}>
+        <StatusBreakdown entries={classEntries} total={total} />
+      </ChartCard>
+
+      {/* Top paths */}
+      <ChartCard title="Top paths">
+        {topPaths.length === 0 ? (
+          <div style={{ color:'var(--text-dim)', fontSize:11, padding:'8px 2px' }}>No HTTP activity yet.</div>
+        ) : topPaths.map(([k, n]) => (
+          <div key={k} style={{ display:'flex', alignItems:'center', gap:8, padding:'4px 0' }}>
+            <span style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--text)', flex:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{k}</span>
+            <div style={{ flex:1, height:6, background:'var(--panel2)', border:'1px solid var(--border)', position:'relative' }}>
+              <div style={{ position:'absolute', inset:0, width:`${(n / topPaths[0][1]) * 100}%`, background:'var(--accent)' }} />
+            </div>
+            <span style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--text-dim)', width:36, textAlign:'right' }}>{n}</span>
+          </div>
+        ))}
+      </ChartCard>
+    </div>
+  );
+}
+
+function StatCard({ label, value, accent }) {
+  return (
+    <div style={{ background:'var(--panel2)', border:'1px solid var(--border)', padding:'10px 12px' }}>
+      <div style={{ fontSize:10, fontWeight:600, letterSpacing:'.07em', textTransform:'uppercase', color:'var(--text-dim)' }}>{label}</div>
+      <div style={{ fontFamily:'var(--mono)', fontSize:15, fontWeight:600, color: accent || '#fff', marginTop:3 }}>{value}</div>
+    </div>
+  );
+}
+
+function ChartCard({ title, right, children }) {
+  return (
+    <div style={{ background:'var(--panel2)', border:'1px solid var(--border)', padding:12 }}>
+      <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:8 }}>
+        <span style={{ fontSize:10, fontWeight:600, letterSpacing:'.07em', textTransform:'uppercase', color:'var(--text-dim)' }}>{title}</span>
+        {right && <span style={{ fontFamily:'var(--mono)', fontSize:10, color:'var(--text-dim)' }}>{right}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function RequestRateChart({ bins, max }) {
+  const W = 488, H = 60, gap = 2;
+  const bw = (W - gap * (bins.length - 1)) / bins.length;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', height:H, display:'block' }}>
+      {bins.map((b, i) => {
+        const h = b.count === 0 ? 0 : Math.max(2, (b.count / max) * (H - 4));
+        const errorH = b.errors === 0 ? 0 : Math.max(1, (b.errors / max) * (H - 4));
+        const x = i * (bw + gap);
+        const y = H - h;
+        const color = b.errors > 0 ? '#ff4d4d' : 'var(--accent)';
+        return (
+          <g key={i}>
+            <rect x={x} y={y} width={bw} height={h} fill={color} opacity={b.count === 0 ? 0.15 : 0.8} />
+            {b.errors > 0 && <rect x={x} y={H - errorH} width={bw} height={errorH} fill="#ff4d4d" />}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function LatencyChart({ points }) {
+  if (points.length < 2) {
+    return <div style={{ color:'var(--text-dim)', fontSize:11, padding:'8px 2px' }}>Need more samples to plot.</div>;
+  }
+  const W = 488, H = 80;
+  const xs = points.map((_, i) => (i / (points.length - 1)) * W);
+  const max = Math.max(1, ...points.map(p => p.ms));
+  const ys = points.map(p => H - (p.ms / max) * (H - 4) - 2);
+  const d = points.map((_, i) => `${i === 0 ? 'M' : 'L'} ${xs[i]} ${ys[i]}`).join(' ');
+  const fill = `${d} L ${W} ${H} L 0 ${H} Z`;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', height:H, display:'block' }}>
+      <path d={fill} fill="var(--accent)" opacity="0.15" />
+      <path d={d} fill="none" stroke="var(--accent)" strokeWidth="1.5" />
+      {points.map((p, i) => (
+        <circle key={i} cx={xs[i]} cy={ys[i]} r={p.status >= 500 ? 2.5 : p.status >= 400 ? 2 : 1.5}
+          fill={STATUS_CLASS_COLORS[STATUS_CLASS(p.status)] || '#9ba39c'} />
+      ))}
+    </svg>
+  );
+}
+
+function StatusBreakdown({ entries, total }) {
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+      <div style={{ display:'flex', height:10, border:'1px solid var(--border)', overflow:'hidden' }}>
+        {entries.map(([k, v]) => (
+          <div key={k} title={`${k}: ${v}`} style={{ width:`${(v / total) * 100}%`, background: STATUS_CLASS_COLORS[k] || '#9ba39c' }} />
+        ))}
+      </div>
+      <div style={{ display:'flex', flexWrap:'wrap', gap:10, marginTop:4 }}>
+        {entries.map(([k, v]) => (
+          <div key={k} style={{ display:'flex', alignItems:'center', gap:5, fontFamily:'var(--mono)', fontSize:11 }}>
+            <span style={{ width:8, height:8, background: STATUS_CLASS_COLORS[k] || '#9ba39c', display:'inline-block' }} />
+            <span style={{ color:'var(--text)' }}>{k}</span>
+            <span style={{ color:'var(--text-dim)' }}>{v}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function percentile(sorted, p) {
+  if (sorted.length === 0) return 0;
+  const arr = [...sorted].sort((a, b) => a - b);
+  const idx = Math.min(arr.length - 1, Math.floor((p / 100) * arr.length));
+  return arr[idx];
+}
+
+function formatBytesShort(n) {
+  if (!n) return '0 B';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
 function TunnelDetail({ tunnel, onClose, dashFetch }) {
   const [tab, setTab] = useState('details');
   const [hoveredCity, setHoveredCity] = useState(null);
   const [tooltip, setTooltip] = useState(null);
   const [visitors, setVisitors] = useState([]);
+  const [entries, setEntries] = useState([]); // raw inspector entries for charts
+  const panelRef = useRef(null);
 
+  // Dismiss the panel on any mousedown outside its DOM subtree. Clicking a
+  // different tunnel row will still open that tunnel — the row's onClick
+  // fires after mousedown and re-sets selectedTunnel.
   useEffect(() => {
-    if (!tunnel || tab !== 'visitors') return;
+    if (!tunnel) return;
+    const onDown = (e) => {
+      if (panelRef.current && !panelRef.current.contains(e.target)) {
+        onClose();
+      }
+    };
+    // mousedown (not click) so the dismiss fires before another row's onClick
+    // lets React re-render — gives a snappier feel than waiting for mouseup.
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [tunnel, onClose]);
+
+  // Details (charts are embedded below the metadata) and Visitors both read
+  // from /api/inspector, so share one poll.
+  useEffect(() => {
+    if (!tunnel || (tab !== 'visitors' && tab !== 'details')) return;
     const filter = tunnel.publicUrl || tunnel.id;
-    const dashFetchVisitors = async () => {
+    const poll = async () => {
       try {
         const res = await dashFetch(`/api/inspector?filter=${encodeURIComponent(filter)}`);
         if (!res.ok) throw new Error(await res.text());
         const raw = await res.json() || [];
+        setEntries(raw);
         const mapped = [...raw].reverse().map((entry, index) => ({
           city: entry.city || 'Unknown location',
           country: entry.country || 'Unknown',
@@ -108,16 +345,20 @@ function TunnelDetail({ tunnel, onClose, dashFetch }) {
         setVisitors(mapped.slice(0, 30));
       } catch (err) {
         setVisitors([]);
+        setEntries([]);
       }
     };
-    dashFetchVisitors();
-    const iv = setInterval(dashFetchVisitors, 1500);
+    poll();
+    const iv = setInterval(poll, 1500);
     return () => clearInterval(iv);
   }, [tunnel, tab]);
 
   if (!tunnel) return null;
 
-  const tabs = [{ id:'details', label:'Details' }, { id:'visitors', label:'Visitors' }];
+  const tabs = [
+    { id:'details',  label:'Details' },
+    { id:'visitors', label:'Visitors' },
+  ];
   const nodes = Object.values(visitors.reduce((acc, visitor) => {
     if (visitor.lat == null || visitor.lon == null) return acc;
     const key = `${visitor.city}|${visitor.countryCode}|${visitor.lat}|${visitor.lon}`;
@@ -154,7 +395,7 @@ function TunnelDetail({ tunnel, onClose, dashFetch }) {
   }
 
   return (
-    <div className="tunnel-detail-panel" style={{ position:'absolute', right:0, top:0, bottom:0, width: tab==='visitors' ? 520 : 360, background:'var(--panel)', borderLeft:'1px solid var(--border2)', display:'flex', flexDirection:'column', zIndex:50, animation:'slideIn .18s ease', transition:'width .2s ease' }}>
+    <div ref={panelRef} className="tunnel-detail-panel" style={{ position:'absolute', right:0, top:0, bottom:0, width: 520, background:'var(--panel)', borderLeft:'1px solid var(--border2)', display:'flex', flexDirection:'column', zIndex:50, animation:'slideIn .18s ease', transition:'width .2s ease' }}>
       <div style={{ padding:'14px 20px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:10, flexShrink:0 }}>
         <StatusDot status={tunnel.status} />
         <span style={{ flex:1, fontSize:14, fontWeight:600, color:'#fff' }}>Local Target: {tunnel.localPort}</span>
@@ -171,25 +412,34 @@ function TunnelDetail({ tunnel, onClose, dashFetch }) {
       </div>
 
       {tab === 'details' && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
-          {[
-            ['ID', tunnel.id],
-            ['Public Endpoint', tunnel.publicUrl ? `${tunnel.urlScheme}://${tunnel.publicUrl}` : 'auto-assigned (start daemon)'],
-            ['Protocol', tunnel.proto.toUpperCase()],
-            ['Status', tunnel.status],
-            ['Latency', tunnel.latency ? `${tunnel.latency}ms` : '—'],
-            ['Requests', tunnel.requests.toLocaleString()],
-            ['Bandwidth', tunnel.bandwidth],
-          ].map(([k,v]) => (
-            <div key={k} style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 3 }}>{k}</div>
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {/* ── Metadata summary ─────────────────────────────────────── */}
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px 20px' }}>
+            {[
+              ['ID', tunnel.id],
+              ['Protocol', tunnel.proto.toUpperCase()],
+              ['Status', tunnel.status],
+              ['Latency', tunnel.latency ? `${tunnel.latency}ms` : '—'],
+              ['Requests', tunnel.requests.toLocaleString()],
+              ['Bandwidth', tunnel.bandwidth],
+            ].map(([k, v]) => (
+              <div key={k}>
+                <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 3 }}>{k}</div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text)', wordBreak: 'break-all' }}>{v}</div>
+              </div>
+            ))}
+            <div style={{ gridColumn: '1 / -1' }}>
+              <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 3 }}>Public Endpoint</div>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text)', wordBreak: 'break-all' }}>
-                {k === 'Public Endpoint' && tunnel.publicUrl ? (
-                  <a href={`${tunnel.urlScheme}://${tunnel.publicUrl}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-mid)', textDecoration: 'none', borderBottom: '1px solid transparent', transition: 'all .1s' }} onMouseEnter={e=>{e.target.style.color='var(--accent)'; e.target.style.borderBottom='1px solid var(--accent)';}} onMouseLeave={e=>{e.target.style.color='var(--text-mid)'; e.target.style.borderBottom='1px solid transparent';}}>{v}</a>
-                ) : v}
+                {tunnel.publicUrl ? (
+                  <a href={`${tunnel.urlScheme}://${tunnel.publicUrl}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-mid)', textDecoration: 'none', borderBottom: '1px solid transparent', transition: 'all .1s' }} onMouseEnter={e=>{e.target.style.color='var(--accent)'; e.target.style.borderBottom='1px solid var(--accent)';}} onMouseLeave={e=>{e.target.style.color='var(--text-mid)'; e.target.style.borderBottom='1px solid transparent';}}>{`${tunnel.urlScheme}://${tunnel.publicUrl}`}</a>
+                ) : 'auto-assigned (start daemon)'}
               </div>
             </div>
-          ))}
+          </div>
+
+          {/* ── Charts derived from /api/inspector ──────────────────── */}
+          <TunnelCharts entries={entries} />
         </div>
       )}
 
@@ -332,8 +582,11 @@ export function App() {
         let urlScheme = 'https';
         const expose = f.expose || 'both';
         if (f.protocol === 'http' || f.protocol === 'https') {
-          let raw = f.public_addr || f.domain || (baseDomain ? `${f.id}.${baseDomain}` : null);
-          // if the stored value has no dot (e.g. a short label without base domain), append it
+          // Only show a URL the server has actually assigned. Don't guess from
+          // forward_id — the server picks a random 8-char subdomain unrelated
+          // to the id, so a speculative fallback would point at a non-existent
+          // tunnel and cause "tunnel not found" on click.
+          let raw = f.public_addr || f.domain || null;
           if (raw && baseDomain && !raw.endsWith('.' + baseDomain) && raw !== baseDomain) raw = `${raw}.${baseDomain}`;
           pubUrl = raw;
           urlScheme = expose === 'http' ? 'http' : 'https';

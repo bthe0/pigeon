@@ -129,7 +129,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fwd.session.writeMessage(proto.Message{
 		Type: proto.MsgInspectorEvent,
 		Payload: proto.InspectorEventPayload{
-			Time:            time.Now().Format(time.RFC3339),
+			// Nanosecond precision disambiguates rapid-fire requests on the
+			// dashboard — the client derives a stable row ID from Time and
+			// would otherwise collide when N requests land in the same second.
+			Time:            time.Now().Format(time.RFC3339Nano),
 			ForwardID:       fwd.id,
 			Domain:          fwd.publicAddr,
 			RemoteAddr:      clientAddr,
