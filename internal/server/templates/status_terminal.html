@@ -4,36 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>{{.Title}}</title>
-    <style>
-        body {
-            margin: 0;
-            background: #08110c;
-            color: #7CFFB2;
-            font: 16px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
-            display: grid;
-            place-items: center;
-            min-height: 100vh;
-        }
-        main {
-            max-width: 720px;
-            padding: 32px;
-            border: 1px solid #184c2c;
-            background: #0d1711;
-            box-shadow: 0 0 0 1px #0f2a19 inset;
-        }
-        h1 {
-            margin: 0 0 8px;
-            font-size: 28px;
-        }
-        p {
-            margin: 0;
-            color: #b7ffd2;
-        }
-        .code {
-            margin-top: 18px;
-            color: #62d891;
-        }
-    </style>
+    {{template "status_terminal_css" .}}
 </head>
 <body>
     <main>

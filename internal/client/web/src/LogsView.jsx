@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import styles from './LogsView.module.css';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 // Each log "kind" gets a distinct colour so the stream is scannable at a glance.
@@ -26,18 +27,10 @@ const statusColor = (s) =>
   s >= 200 ? '#00e87a' :
              '#9ba39c';
 
-// ── Classification ───────────────────────────────────────────────────────────
-// Normalise each API log row into a uniform { time, kind, msg } shape so
-// the render pass doesn't have to branch on record type.
-
 const DAEMON_RULES = [
-  // ERROR — things that genuinely went wrong.
   { kind: 'ERROR', match: /\berror\b|\bfail(ed)?\b|\brefus(ed|al)\b|dial local|cannot |panic/i },
-  // WARN — degraded but not broken.
   { kind: 'WARN',  match: /\bwarn(ing)?\b|disconnect|reconnect|retry|attempt|rate[- ]limit|rejected|locked/i },
-  // OK — positive lifecycle events.
   { kind: 'OK',    match: /\bconnected\b|forward ready|dashboard at|web ui|listening on|tunnel ready|enabled|started/i },
-  // DEBUG — verbose operational noise.
   { kind: 'DEBUG', match: /attempt \d|\bping\b|\bpong\b|reloaded|skipping|saving/i },
 ];
 
@@ -46,8 +39,6 @@ function classifyDaemon(msg) {
   return 'INFO';
 }
 
-// Turn an HTTP traffic action like "GET /foo 200 12ms" into its parts so we
-// can render each piece with its own colour.
 function parseHTTPAction(action) {
   const m = action && action.match(/^(\w+)\s+(\S+)\s+(\d{3})\s+(\d+)ms$/);
   if (!m) return null;
@@ -58,9 +49,6 @@ function classifyRow(r) {
   const d = new Date(r.time);
   const t = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
 
-  // Backend mixes cases: daemon.log tail is stamped "DAEMON" uppercase,
-  // client-written NDJSON uses lowercase "http"/"tcp"/"udp". Normalise once
-  // so downstream branches are case-insensitive.
   const proto = (r.protocol || '').toUpperCase();
   const action = r.action || '';
 
@@ -78,8 +66,6 @@ function classifyRow(r) {
       const kind = parsed.status >= 500 ? 'ERROR' : parsed.status >= 400 ? 'WARN' : 'HTTP';
       return { t, kind, type: 'http', parsed, tunnel, remote, bytes };
     }
-    // Non-parseable HTTP actions (e.g. "CONNECT" when the client opens a
-    // new yamux stream) still need to render; tag them as a generic event.
     return { t, kind: 'HTTP', type: 'event', action, tunnel, remote, bytes, proto };
   }
   if (proto === 'TCP') {
@@ -88,17 +74,11 @@ function classifyRow(r) {
   if (proto === 'UDP') {
     return { t, kind: 'UDP', type: 'event', action, tunnel, remote, bytes, proto };
   }
-  // Unknown/missing protocol but we still have useful per-request fields
-  // (historic NDJSON entries predate the protocol column). Render whatever
-  // we can instead of showing "?".
   if (tunnel || remote || bytes) {
     return { t, kind: 'INFO', type: 'event', action: action || 'request', tunnel, remote, bytes, proto: proto || '' };
   }
-  // Truly nothing to show — fall back to a plain system message.
   return { t, kind: 'INFO', type: 'sys', msg: `${r.protocol || '?'} ${action}`.trim() };
 }
-
-// ── Component ────────────────────────────────────────────────────────────────
 
 export function LogsView({ dashFetch }) {
   const [logs, setLogs] = useState([]);
@@ -147,8 +127,6 @@ export function LogsView({ dashFetch }) {
     ? logs
     : logs.filter(l => {
         if (l.kind === kindFilter) return true;
-        // 'HTTP' tab surfaces every http-related row (parsed access log OR
-        // stream-open events that get kind=HTTP via classifyRow).
         if (kindFilter === 'HTTP' && (l.type === 'http' || (l.type === 'event' && (l.proto === 'HTTP' || l.proto === 'HTTPS')))) return true;
         if (kindFilter === 'TCP' && l.type === 'event' && l.proto === 'TCP') return true;
         if (kindFilter === 'UDP' && l.type === 'event' && l.proto === 'UDP') return true;
@@ -156,35 +134,38 @@ export function LogsView({ dashFetch }) {
       });
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div className="logs-toolbar" style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 15, fontWeight: 600, color: '#fff' }}>System Logs</div>
-          <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 1 }}>{filtered.length} entries</div>
+    <div className={styles.page}>
+      <div className={styles.toolbar}>
+        <div className={styles.toolbarTitleWrap}>
+          <div className={styles.toolbarTitle}>System Logs</div>
+          <div className={styles.toolbarCount}>{filtered.length} entries</div>
         </div>
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+        <div className={styles.filters}>
           {filters.map(l => {
             const active = kindFilter === l;
             const c = KIND_COLORS[l] || 'var(--accent)';
             return (
-              <button key={l} onClick={() => setKindFilter(l)}
-                style={{
-                  padding: '4px 8px',
-                  background: active ? c + '22' : 'var(--panel2)',
-                  border: `1px solid ${active ? c : 'var(--border2)'}`,
-                  color: active ? c : 'var(--text-dim)',
-                  fontSize: 10, fontFamily: 'var(--mono)', fontWeight: 600,
-                  cursor: 'pointer', letterSpacing: '.06em',
-                }}>{l}</button>
+              <button
+                key={l}
+                onClick={() => setKindFilter(l)}
+                className={styles.filterBtn}
+                style={active ? { background: c + '22', borderColor: c, color: c } : undefined}
+              >
+                {l}
+              </button>
             );
           })}
         </div>
-        <button onClick={() => setLive(x=>!x)}
-          style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', background: live ? 'var(--accent-dim)' : 'var(--panel2)', border: `1px solid ${live ? 'var(--accent-mid)' : 'var(--border2)'}`, color: live ? 'var(--accent)' : 'var(--text-dim)', fontSize: 11, fontWeight: 600, cursor: 'pointer', letterSpacing: '.04em' }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: live ? 'var(--accent)' : 'var(--text-dim)', display: 'inline-block', animation: live ? 'pulse 1.5s ease infinite' : 'none' }} />
+        <button
+          onClick={() => setLive(x => !x)}
+          className={`${styles.liveBtn} ${live ? styles.liveBtnActive : ''}`}
+        >
+          <span className={`${styles.liveDot} ${live ? styles.liveDotActive : ''}`} />
           {live ? 'LIVE' : 'PAUSED'}
         </button>
-        <button onClick={async () => {
+        <button
+          className={styles.clearBtn}
+          onClick={async () => {
             if (!window.confirm('Delete all log files? This cannot be undone.')) return;
             try {
               const res = await dashFetch('/api/logs', { method: 'DELETE' });
@@ -194,22 +175,24 @@ export function LogsView({ dashFetch }) {
               alert('Failed to clear logs: ' + err.message);
             }
           }}
-          style={{ background: 'none', border: '1px solid var(--border2)', padding: '5px 10px', color: 'var(--text-dim)', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--sans)' }}>Clear</button>
+        >
+          Clear
+        </button>
       </div>
 
-      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '8px 24px', fontFamily: 'var(--mono)', fontSize: 11.5, lineHeight: 1.8 }}>
+      <div ref={scrollRef} className={styles.stream}>
         {loading ? (
-          <div style={{ paddingTop: 16 }}>
+          <div className={styles.skeletonWrap}>
             {[52, 52, 52, 52, 52, 52, 52, 52].map((w, i) => (
-              <div key={i} style={{ display: 'flex', gap: 14, padding: '6px 0', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
-                <div style={{ height: 7, width: w,  background: 'var(--border2)', borderRadius: 2, flexShrink: 0, animation: `shimmer 1.8s ease ${i * 0.1}s infinite` }} />
-                <div style={{ height: 7, width: 36, background: 'var(--border2)', borderRadius: 2, flexShrink: 0, animation: `shimmer 1.8s ease ${i * 0.1 + 0.05}s infinite` }} />
-                <div style={{ height: 7, flex: 1,   background: 'var(--border2)', borderRadius: 2, animation: `shimmer 1.8s ease ${i * 0.1 + 0.1}s infinite` }} />
+              <div key={i} className={styles.skeletonRow}>
+                <div className={styles.skeletonBar} style={{ width: w, animation: `shimmer 1.8s ease ${i * 0.1}s infinite` }} />
+                <div className={styles.skeletonBar} style={{ width: 36, animation: `shimmer 1.8s ease ${i * 0.1 + 0.05}s infinite` }} />
+                <div className={styles.skeletonBarFlex} style={{ animation: `shimmer 1.8s ease ${i * 0.1 + 0.1}s infinite` }} />
               </div>
             ))}
           </div>
         ) : filtered.length === 0 ? (
-          <div style={{ color: 'var(--text-dim)', textAlign: 'center', marginTop: 40, fontFamily: 'var(--sans)' }}>No log entries yet.</div>
+          <div className={styles.empty}>No log entries yet.</div>
         ) : (
           filtered.map((l, i) => <LogRow key={i} l={l} />)
         )}
@@ -218,24 +201,19 @@ export function LogsView({ dashFetch }) {
   );
 }
 
-// ── Log row ──────────────────────────────────────────────────────────────────
-
 function KindBadge({ kind }) {
   const c = KIND_COLORS[kind] || '#9ba39c';
   return (
-    <span style={{
-      flexShrink: 0, display: 'inline-block', width: 46, textAlign: 'center',
-      fontWeight: 700, fontSize: 10, letterSpacing: '.06em',
-      color: c, background: c + '22', border: `1px solid ${c}55`,
-      padding: '0 4px',
-    }}>{kind}</span>
+    <span className={styles.kindBadge} style={{ color: c, background: c + '22', border: `1px solid ${c}55` }}>
+      {kind}
+    </span>
   );
 }
 
 function LogRow({ l }) {
   return (
-    <div style={{ display: 'flex', gap: 12, padding: '3px 0', alignItems: 'baseline' }}>
-      <span style={{ color: 'var(--text-dim)', flexShrink: 0, userSelect: 'none', fontSize: 10 }}>{l.t}</span>
+    <div className={styles.row}>
+      <span className={styles.rowTime}>{l.t}</span>
       <KindBadge kind={l.kind} />
       <LogBody l={l} />
     </div>
@@ -243,36 +221,32 @@ function LogRow({ l }) {
 }
 
 function LogBody({ l }) {
-  // Fully parsed HTTP access-log line: show each piece in its own colour.
   if (l.type === 'http' && l.parsed) {
     const { method, path, status, ms } = l.parsed;
     return (
-      <span style={{ flex: 1, minWidth: 0, display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
-        <span style={{ color: METHOD_COLORS[method] || '#9ba39c', fontWeight: 700 }}>{method}</span>
-        <span style={{ color: statusColor(status), fontWeight: 700 }}>{status}</span>
-        <span style={{ color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{path}</span>
-        <span style={{ color: 'var(--text-dim)' }}>{ms}ms</span>
-        {l.tunnel ? <span style={{ color: 'var(--text-dim)' }}>· {l.tunnel}</span> : null}
-        {l.remote ? <span style={{ color: 'var(--text-dim)' }}>← {l.remote}</span> : null}
-        {l.bytes  ? <span style={{ color: 'var(--text-dim)' }}>· {formatBytes(l.bytes)}</span> : null}
+      <span className={styles.bodyHttp}>
+        <span className={styles.bodyMethod} style={{ color: METHOD_COLORS[method] || '#9ba39c' }}>{method}</span>
+        <span className={styles.bodyStatus} style={{ color: statusColor(status) }}>{status}</span>
+        <span className={styles.bodyPath}>{path}</span>
+        <span className={styles.bodyDim}>{ms}ms</span>
+        {l.tunnel ? <span className={styles.bodyDim}>· {l.tunnel}</span> : null}
+        {l.remote ? <span className={styles.bodyDim}>← {l.remote}</span> : null}
+        {l.bytes  ? <span className={styles.bodyDim}>· {formatBytes(l.bytes)}</span> : null}
       </span>
     );
   }
 
-  // Protocol events (CONNECT, IN, OUT) that don't fit the access-log shape.
   if (l.type === 'event') {
     return (
-      <span style={{ flex: 1, minWidth: 0, display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
-        <span style={{ color: 'var(--text)', fontWeight: 600 }}>{l.action || '—'}</span>
-        {l.tunnel ? <span style={{ color: 'var(--text-dim)' }}>· {l.tunnel}</span> : null}
-        {l.remote ? <span style={{ color: 'var(--text-dim)' }}>← {l.remote}</span> : null}
-        {l.bytes  ? <span style={{ color: 'var(--text-dim)' }}>· {formatBytes(l.bytes)}</span> : null}
+      <span className={styles.bodyEvent}>
+        <span className={styles.bodyAction}>{l.action || '—'}</span>
+        {l.tunnel ? <span className={styles.bodyDim}>· {l.tunnel}</span> : null}
+        {l.remote ? <span className={styles.bodyDim}>← {l.remote}</span> : null}
+        {l.bytes  ? <span className={styles.bodyDim}>· {formatBytes(l.bytes)}</span> : null}
       </span>
     );
   }
 
-  // System / daemon message — tint the text for WARN/ERROR so the stream
-  // stays readable even if you've glossed over the badge.
   const textColor =
     l.kind === 'ERROR' ? '#ff4d4d' :
     l.kind === 'WARN'  ? '#f5c542' :
@@ -280,7 +254,7 @@ function LogBody({ l }) {
     l.kind === 'DEBUG' ? '#9b8fff' :
     'var(--text)';
   return (
-    <span style={{ flex: 1, minWidth: 0, color: textColor, overflowWrap: 'anywhere' }}>{l.msg || '—'}</span>
+    <span className={styles.bodySys} style={{ color: textColor }}>{l.msg || '—'}</span>
   );
 }
 

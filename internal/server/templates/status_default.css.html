@@ -1,0 +1,48 @@
+{{define "status_default_css"}}<style>
+    :root {
+        --bg: #0b0d0c;
+        --panel: #111412;
+        --border: #222522;
+        --text: #d8ddd9;
+        --text-dim: #9ba39c;
+        --accent: #00e87a;
+    }
+    body {
+        margin: 0;
+        background: radial-gradient(circle at top, #162119, #0b0d0c 60%);
+        color: var(--text);
+        font: 16px/1.5 Inter, system-ui, sans-serif;
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        padding: 24px;
+    }
+    main {
+        width: min(620px, 100%);
+        background: rgba(17,20,18,.96);
+        border: 1px solid var(--border);
+        padding: 32px;
+        border-radius: 18px;
+        box-shadow: 0 12px 40px rgba(0,0,0,.25);
+    }
+    .eyebrow {
+        font-size: 11px;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+        color: var(--accent);
+        margin-bottom: 12px;
+    }
+    .status {
+        font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: var(--text-dim);
+        margin-top: 16px;
+    }
+    h1 {
+        margin: 0 0 10px;
+        font-size: 30px;
+    }
+    .msg {
+        margin: 0;
+        color: var(--text-dim);
+    }
+</style>{{end}}

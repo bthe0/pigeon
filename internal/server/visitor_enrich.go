@@ -97,8 +97,14 @@ func (s *Server) lookupGeo(ip string) geoInfo {
 		return v.(geoInfo)
 	}
 
+	// Refuse to touch the outbound lookup URL with anything that isn't a
+	// literal IP. Callers receive ip from X-Forwarded-For et al., so a hostile
+	// value could otherwise inject ?query or /path into ip-api.com/json/<ip>.
 	parsed := net.ParseIP(ip)
-	if parsed != nil && (parsed.IsLoopback() || parsed.IsPrivate()) {
+	if parsed == nil {
+		return geoInfo{}
+	}
+	if parsed.IsLoopback() || parsed.IsPrivate() {
 		info := geoInfo{City: "Local", Country: "Local", CountryCode: "LO"}
 		s.geoCache.Store(ip, info)
 		return info

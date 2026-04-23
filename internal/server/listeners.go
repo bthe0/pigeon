@@ -3,11 +3,47 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
+	"sync"
+	"time"
 
 	"github.com/bthe0/pigeon/internal/netx"
 	"github.com/bthe0/pigeon/internal/proto"
 )
+
+// udpPeerTTL bounds how long a UDP peer address stays on the allow-list after
+// the server last heard from it. The pigeon client may only send a datagram
+// back to a peer we've recently heard from — otherwise an authenticated
+// client could abuse the server's UDP socket to spray traffic to arbitrary
+// destinations from the server's IP.
+const udpPeerTTL = 2 * time.Minute
+
+// udpPeerSet tracks recently-seen UDP source addresses for a single forward.
+// Access is guarded by sync.Map so the reader (inbound datagrams) and writer
+// (client-supplied frames) goroutines don't race.
+type udpPeerSet struct {
+	m sync.Map // canonical addr string → time.Time (lastSeen)
+}
+
+func (s *udpPeerSet) remember(addr string) {
+	s.m.Store(addr, time.Now())
+}
+
+// allowed reports whether addr is currently trusted. Stale entries are purged
+// on lookup so the map can't grow without bound even under steady traffic.
+func (s *udpPeerSet) allowed(addr string) bool {
+	v, ok := s.m.Load(addr)
+	if !ok {
+		return false
+	}
+	seen := v.(time.Time)
+	if time.Since(seen) > udpPeerTTL {
+		s.m.Delete(addr)
+		return false
+	}
+	return true
+}
 
 // openPort binds a TCP listener or UDP packet conn for fwd and starts serving
 // it. The returned port is the resolved numeric port (useful when the caller
@@ -94,6 +130,8 @@ func (s *Server) serveUDP(pc net.PacketConn, fwd *forward) {
 		return
 	}
 
+	peers := &udpPeerSet{}
+
 	// Server → client: read datagrams, frame them
 	go func() {
 		buf := make([]byte, 65535)
@@ -108,17 +146,25 @@ func (s *Server) serveUDP(pc net.PacketConn, fwd *forward) {
 					continue
 				}
 			}
+			peers.remember(addr.String())
 			enc.Encode(proto.UDPFrame{Addr: addr.String(), Data: buf[:n]})
 			s.logTraffic(fwd, addr.String(), "UDP", "IN", n)
 		}
 	}()
 
-	// Client → server: read framed datagrams, send them
+	// Client → server: read framed datagrams, send them. Drop frames addressed
+	// to peers we haven't recently heard from — the client is trusted to
+	// respond to inbound senders, not to originate traffic to arbitrary
+	// destinations through the server.
 	dec := json.NewDecoder(stream)
 	for {
 		var frame proto.UDPFrame
 		if err := dec.Decode(&frame); err != nil {
 			return
+		}
+		if !peers.allowed(frame.Addr) {
+			log.Printf("[%s] dropped UDP frame to unseen peer %s", fwd.id, frame.Addr)
+			continue
 		}
 		addr, err := net.ResolveUDPAddr("udp", frame.Addr)
 		if err != nil {

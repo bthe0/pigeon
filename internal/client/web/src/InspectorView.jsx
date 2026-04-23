@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Icon, Icons } from './Icons';
 import { Pill } from './Shared';
 import { statusColor } from './Constants';
+import styles from './InspectorView.module.css';
 
 const METHOD_COLORS = { GET:'#4d9fff', POST:'#00e87a', PUT:'#f5c542', DELETE:'#ff4d4d', PATCH:'#c084fc', OPTIONS:'#6b7068', HEAD:'#9ba39c' };
 
@@ -126,178 +127,174 @@ export function InspectorView({ tunnels, dashFetch }) {
   const onlineTunnels = tunnels.filter(t => t.status === 'online');
 
   return (
-    <div className="inspector-layout" style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-      <div className="inspector-list" style={{ flex: '0 0 480px', display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)' }}>
-        <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: '#fff' }}>Request Inspector</div>
-            <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 1 }}>{requests.length} requests captured</div>
+    <div className={styles.layout}>
+      <div className={styles.list}>
+        <div className={styles.listHeader}>
+          <div className={styles.titleWrap}>
+            <div className={styles.title}>Request Inspector</div>
+            <div className={styles.subtitle}>{requests.length} requests captured</div>
           </div>
-          <button onClick={() => setLiveMode(x=>!x)}
-            style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', background: liveMode ? 'var(--accent-dim)' : 'var(--panel2)', border: `1px solid ${liveMode ? 'var(--accent-mid)' : 'var(--border2)'}`, color: liveMode ? 'var(--accent)' : 'var(--text-dim)', fontSize: 11, fontWeight: 600, cursor: 'pointer', letterSpacing: '.04em' }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: liveMode ? 'var(--accent)' : 'var(--text-dim)', display: 'inline-block', animation: liveMode ? 'pulse 1.5s ease infinite' : 'none' }} />
+          <button
+            onClick={() => setLiveMode(x => !x)}
+            className={`${styles.liveBtn} ${liveMode ? styles.liveBtnActive : ''}`}
+          >
+            <span className={`${styles.liveDot} ${liveMode ? styles.liveDotActive : ''}`} />
             {liveMode ? 'LIVE' : 'PAUSED'}
           </button>
-          <select value={filterTunnel} onChange={e=>setFilterTunnel(e.target.value)}
-            style={{ background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '5px 8px', fontSize: 11, fontFamily: 'var(--mono)', outline: 'none' }}>
+          <select
+            value={filterTunnel}
+            onChange={e => setFilterTunnel(e.target.value)}
+            className={styles.filterSelect}
+          >
             <option value="all">All tunnels</option>
             {onlineTunnels.map(t => <option key={t.id} value={t.publicUrl || t.id}>{t.publicUrl || t.id}</option>)}
           </select>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '60px 60px 1fr 50px 50px', gap: '0 8px', padding: '5px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-          {['Time','Method','Path','Status','Dur.'].map(h=>(
-            <div key={h} style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)' }}>{h}</div>
+        <div className={styles.columns}>
+          {['Time','Method','Path','Status','Dur.'].map(h => (
+            <div key={h} className={styles.columnLabel}>{h}</div>
           ))}
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div className={styles.rows}>
           {loading ? (
-            <div style={{ padding: 24, color: 'var(--text-dim)', fontSize: 12 }}>Loading inspector…</div>
+            <div className={styles.empty}>Loading inspector…</div>
           ) : requests.length === 0 ? (
-            <div style={{ padding: 24, color: 'var(--text-dim)', fontSize: 12 }}>No HTTP requests captured yet.</div>
+            <div className={styles.empty}>No HTTP requests captured yet.</div>
           ) : requests.map(r => (
-            <div key={r.id} onClick={() => setSelected(r)}
-              style={{ display: 'grid', gridTemplateColumns: '60px 60px 1fr 50px 50px', gap: '0 8px', padding: '8px 16px', borderBottom: '1px solid var(--border)', cursor: 'pointer', background: selected?.id === r.id ? 'var(--accent-dim)' : 'transparent', borderLeft: selected?.id === r.id ? '2px solid var(--accent)' : '2px solid transparent', transition: 'background .1s', alignItems: 'center' }}>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>{r.time}</span>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600, color: METHOD_COLORS[r.method] || '#9ba39c' }}>{r.method}</span>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.path}</span>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, color: statusColor(r.status) }}>{r.status}</span>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>{r.ms}ms</span>
+            <div
+              key={r.id}
+              onClick={() => setSelected(r)}
+              className={`${styles.row} ${selected?.id === r.id ? styles.rowSelected : ''}`}
+            >
+              <span className={styles.rowTime}>{r.time}</span>
+              <span className={styles.rowMethod} style={{ color: METHOD_COLORS[r.method] || '#9ba39c' }}>{r.method}</span>
+              <span className={styles.rowPath}>{r.path}</span>
+              <span className={styles.rowStatus} style={{ color: statusColor(r.status) }}>{r.status}</span>
+              <span className={styles.rowMs}>{r.ms}ms</span>
             </div>
           ))}
         </div>
       </div>
 
-      <div className="inspector-detail" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div className={styles.detail}>
         {selected ? (
           <>
-            <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className={styles.detailHeader}>
+              <div className={styles.detailTopRow}>
                 <Pill color={METHOD_COLORS[selected.method] || '#9ba39c'}>{selected.method}</Pill>
-                <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: '#fff', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selected.path}</span>
-                <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: statusColor(selected.status) }}>{selected.status}</span>
+                <span className={styles.detailPath}>{selected.path}</span>
+                <span className={styles.detailStatus} style={{ color: statusColor(selected.status) }}>{selected.status}</span>
                 {editMode ? (
                   <>
-                    <button onClick={cancelEdit} disabled={replaying}
-                      style={{ background: 'var(--panel2)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '5px 12px', fontSize: 11, fontWeight: 600, cursor: replaying ? 'default' : 'pointer', letterSpacing: '.03em' }}>
-                      Cancel
-                    </button>
-                    <button onClick={sendReplay} disabled={replaying}
-                      style={{ display: 'flex', alignItems: 'center', gap: 5, background: replaying ? 'var(--accent-mid)' : 'var(--accent)', border: 'none', color: '#000', padding: '5px 12px', fontSize: 11, fontWeight: 600, cursor: replaying ? 'default' : 'pointer', letterSpacing: '.03em' }}>
+                    <button onClick={cancelEdit} disabled={replaying} className={styles.cancelBtn}>Cancel</button>
+                    <button onClick={sendReplay} disabled={replaying} className={styles.sendBtn}>
                       {replaying ? 'Sending…' : 'Send'}
                     </button>
                   </>
                 ) : (
-                  <button onClick={startEdit} disabled={replaying}
-                    style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'var(--accent)', border: 'none', color: '#000', padding: '5px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer', letterSpacing: '.03em' }}>
-                    Replay
-                  </button>
+                  <button onClick={startEdit} disabled={replaying} className={styles.replayBtn}>Replay</button>
                 )}
               </div>
-              <div style={{ marginTop: 6, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                {[['Tunnel', selected.tunnel], ['IP', selected.ip], ['Duration', selected.ms+'ms'], ['Size', selected.size], ['Time', selected.time]].map(([k,v]) => (
+              <div className={styles.metaRow}>
+                {[['Tunnel', selected.tunnel], ['IP', selected.ip], ['Duration', selected.ms + 'ms'], ['Size', selected.size], ['Time', selected.time]].map(([k, v]) => (
                   <div key={k}>
-                    <span style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '.06em' }}>{k} </span>
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-mid)' }}>{v}</span>
+                    <span className={styles.metaKey}>{k} </span>
+                    <span className={styles.metaValue}>{v}</span>
                   </div>
                 ))}
               </div>
             </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)' }}>Request Headers</div>
+
+            <div className={styles.body}>
+              <div className={styles.section}>
+                <div className={styles.sectionHeader}>
+                  <div className={styles.sectionLabel}>Request Headers</div>
                   {editMode && <Pill color="var(--accent)">editing</Pill>}
                 </div>
                 {editMode ? (
-                  <div style={{ background: 'var(--panel2)', border: '1px solid var(--border)', padding: '10px 12px' }}>
-                    {editHeaders.length === 0 && (
-                      <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-dim)', marginBottom: 6 }}>No headers.</div>
-                    )}
+                  <div className={styles.editorBox}>
+                    {editHeaders.length === 0 && <div className={styles.editorNote}>No headers.</div>}
                     {editHeaders.map(([k, v], idx) => (
-                      <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-                        <input value={k} onChange={e => updateHeaderKey(idx, e.target.value)} placeholder="Header" disabled={replaying}
-                          style={{ flex: '0 0 180px', background: 'var(--panel)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '5px 8px', fontSize: 11, fontFamily: 'var(--mono)', outline: 'none' }} />
-                        <input value={v} onChange={e => updateHeaderValue(idx, e.target.value)} placeholder="Value" disabled={replaying}
-                          style={{ flex: 1, minWidth: 0, background: 'var(--panel)', border: '1px solid var(--border2)', color: 'var(--text)', padding: '5px 8px', fontSize: 11, fontFamily: 'var(--mono)', outline: 'none' }} />
-                        <button type="button" onClick={() => removeHeader(idx)} disabled={replaying}
-                          style={{ background: 'none', border: '1px solid var(--border2)', color: '#ff4d4d88', padding: '4px 8px', fontSize: 11, cursor: replaying ? 'default' : 'pointer' }}>
+                      <div key={idx} className={styles.editorRow}>
+                        <input value={k} onChange={e => updateHeaderKey(idx, e.target.value)} placeholder="Header" disabled={replaying} className={styles.editorInputKey} />
+                        <input value={v} onChange={e => updateHeaderValue(idx, e.target.value)} placeholder="Value" disabled={replaying} className={styles.editorInputValue} />
+                        <button type="button" onClick={() => removeHeader(idx)} disabled={replaying} className={styles.trashBtn}>
                           <Icon d={Icons.trash} size={11} color="#ff4d4d" />
                         </button>
                       </div>
                     ))}
-                    <button type="button" onClick={addHeader} disabled={replaying}
-                      style={{ background: 'var(--panel)', border: '1px solid var(--border2)', color: 'var(--text-dim)', padding: '5px 10px', fontSize: 11, fontWeight: 600, cursor: replaying ? 'default' : 'pointer', letterSpacing: '.04em' }}>
-                      + Add header
-                    </button>
+                    <button type="button" onClick={addHeader} disabled={replaying} className={styles.addHeaderBtn}>+ Add header</button>
                   </div>
                 ) : (
-                  <div style={{ background: 'var(--panel2)', border: '1px solid var(--border)', padding: '12px 14px', fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.7, overflowX: 'hidden' }}>
-                    {Object.keys(selected.request_headers || {}).length > 0 ? Object.entries(selected.request_headers).map(([k,v]) => (
-                      <div key={k} style={{ wordBreak: 'break-all', overflowWrap: 'anywhere' }}><span style={{color:'var(--text-dim)'}}>{k}: </span><span style={{color:'var(--text)'}}>{v}</span></div>
+                  <div className={styles.headersBox}>
+                    {Object.keys(selected.request_headers || {}).length > 0 ? Object.entries(selected.request_headers).map(([k, v]) => (
+                      <div key={k} className={styles.headerLine}>
+                        <span className={styles.headerKey}>{k}: </span>
+                        <span className={styles.headerValue}>{v}</span>
+                      </div>
                     )) : (
-                      <span style={{ color: 'var(--text-dim)' }}>No headers recorded.</span>
+                      <span className={styles.emptyText}>No headers recorded.</span>
                     )}
                   </div>
                 )}
               </div>
 
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 8 }}>Response Headers</div>
-                <div style={{ background: 'var(--panel2)', border: '1px solid var(--border)', padding: '12px 14px', fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.7, overflowX: 'hidden' }}>
-                  {Object.keys(selected.response_headers || {}).length > 0 ? Object.entries(selected.response_headers).map(([k,v]) => (
-                    <div key={k} style={{ wordBreak: 'break-all', overflowWrap: 'anywhere' }}><span style={{color:'var(--text-dim)'}}>{k}: </span><span style={{color:'var(--text)'}}>{v}</span></div>
+              <div className={styles.section}>
+                <div className={`${styles.sectionLabel} ${styles.sectionLabelSpaced}`}>Response Headers</div>
+                <div className={styles.headersBox}>
+                  {Object.keys(selected.response_headers || {}).length > 0 ? Object.entries(selected.response_headers).map(([k, v]) => (
+                    <div key={k} className={styles.headerLine}>
+                      <span className={styles.headerKey}>{k}: </span>
+                      <span className={styles.headerValue}>{v}</span>
+                    </div>
                   )) : (
-                    <span style={{ color: 'var(--text-dim)' }}>No headers recorded.</span>
+                    <span className={styles.emptyText}>No headers recorded.</span>
                   )}
                 </div>
               </div>
 
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)' }}>Request Body</div>
+              <div className={styles.section}>
+                <div className={styles.sectionHeader}>
+                  <div className={styles.sectionLabel}>Request Body</div>
                   {selected.request_body_encoding === 'base64' && <Pill color="#f5c542">base64</Pill>}
                   {selected.request_body_truncated && <Pill color="#ff4d4d">truncated</Pill>}
                   {editMode && <Pill color="var(--accent)">editing</Pill>}
                 </div>
                 {editMode ? (
-                  <textarea value={editBody} onChange={e => setEditBody(e.target.value)} disabled={replaying}
-                    rows={8}
-                    style={{ width: '100%', boxSizing: 'border-box', background: 'var(--panel2)', border: '1px solid var(--border)', color: 'var(--text)', padding: '12px 14px', fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.5, outline: 'none', resize: 'vertical' }} />
+                  <textarea value={editBody} onChange={e => setEditBody(e.target.value)} disabled={replaying} rows={8} className={styles.textarea} />
                 ) : (
-                  <pre style={{ background: 'var(--panel2)', border: '1px solid var(--border)', padding: '12px 14px', fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.5, overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0, color: selected.request_body ? 'var(--text)' : 'var(--text-dim)', maxHeight: 280 }}>
+                  <pre className={`${styles.pre} ${selected.request_body ? '' : styles.preEmpty}`}>
                     {selected.request_body || 'Body capture disabled for this tunnel.'}
                   </pre>
                 )}
               </div>
 
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)' }}>Response Body</div>
+              <div className={styles.section}>
+                <div className={styles.sectionHeader}>
+                  <div className={styles.sectionLabel}>Response Body</div>
                   {selected.response_body_encoding === 'base64' && <Pill color="#f5c542">base64</Pill>}
                   {selected.response_body_truncated && <Pill color="#ff4d4d">truncated</Pill>}
                 </div>
-                <pre style={{ background: 'var(--panel2)', border: '1px solid var(--border)', padding: '12px 14px', fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.5, overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0, color: selected.response_body ? 'var(--text)' : 'var(--text-dim)', maxHeight: 280 }}>
+                <pre className={`${styles.pre} ${selected.response_body ? '' : styles.preEmpty}`}>
                   {selected.response_body || 'Body capture disabled for this tunnel.'}
                 </pre>
               </div>
 
               {replayResult && (
-                <div style={{ marginTop: 12, marginBottom: 20 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--accent)', marginBottom: 8 }}>Replay result</div>
+                <div className={styles.replaySection}>
+                  <div className={styles.replayLabel}>Replay result</div>
                   {replayResult.error ? (
-                    <div style={{ background: 'var(--panel2)', border: '1px solid var(--red)', padding: '12px 14px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--red)' }}>{replayResult.error}</div>
+                    <div className={styles.replayError}>{replayResult.error}</div>
                   ) : (
                     <div>
-                      <div style={{ display: 'flex', gap: 12, marginBottom: 8 }}>
-                        <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: statusColor(replayResult.status) }}>{replayResult.status}</span>
-                        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-dim)' }}>{replayResult.duration_ms}ms</span>
+                      <div className={styles.replayMeta}>
+                        <span className={styles.replayStatus} style={{ color: statusColor(replayResult.status) }}>{replayResult.status}</span>
+                        <span className={styles.replayDuration}>{replayResult.duration_ms}ms</span>
                         {replayResult.truncated && <Pill color="#ff4d4d">truncated</Pill>}
                       </div>
-                      <pre style={{ background: 'var(--panel2)', border: '1px solid var(--border)', padding: '12px 14px', fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.5, overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0, color: 'var(--text)', maxHeight: 280 }}>
-                        {replayResult.body || '(empty response)'}
-                      </pre>
+                      <pre className={styles.pre}>{replayResult.body || '(empty response)'}</pre>
                     </div>
                   )}
                 </div>
@@ -305,7 +302,7 @@ export function InspectorView({ tunnels, dashFetch }) {
             </div>
           </>
         ) : (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', fontSize: 13, flexDirection: 'column', gap: 8 }}>
+          <div className={styles.placeholder}>
             <Icon d={Icons.activity} size={32} color="var(--border2)" />
             <span>Select a request to inspect</span>
           </div>
@@ -314,4 +311,3 @@ export function InspectorView({ tunnels, dashFetch }) {
     </div>
   );
 }
-

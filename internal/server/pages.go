@@ -10,6 +10,10 @@ import (
 //go:embed templates/*.html
 var templatesFS embed.FS
 
+// CSS is split into sibling .css.html files (each defining one named template
+// via {{define}}), so the HTML page templates can include them via {{template}}.
+// The *.html glob matches both the page files and the .css.html siblings; the
+// parser merges every {{define}} into one namespace before rendering.
 var templates = template.Must(template.ParseFS(templatesFS, "templates/*.html"))
 
 // pageVariant normalises the user-configurable variant name down to a known

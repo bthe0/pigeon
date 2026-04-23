@@ -78,7 +78,12 @@ func LogDir() (string, error) {
 		return "", err
 	}
 	logDir := filepath.Join(dir, "logs")
-	return logDir, os.MkdirAll(logDir, 0755)
+	if err := os.MkdirAll(logDir, 0700); err != nil {
+		return "", err
+	}
+	// Tighten perms on upgrades: logDir was created at 0755 in older versions.
+	_ = os.Chmod(logDir, 0700)
+	return logDir, nil
 }
 
 // PIDFile returns a PID file path derived from the active config filename so

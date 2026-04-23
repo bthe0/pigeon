@@ -7,6 +7,7 @@ import { InspectorView } from './InspectorView';
 import { LogsView } from './LogsView';
 import { SettingsView } from './SettingsView';
 import { LoginView } from './LoginView';
+import styles from './App.module.css';
 
 function latLonToXY(lat, lon, W, H) {
   return { x: (lon + 180) / 360 * W, y: (90 - lat) / 180 * H };
@@ -26,38 +27,45 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
+// State-changing methods trigger the server's CSRF guard: browsers can't set
+// custom headers cross-origin without a CORS preflight (which the dashboard
+// doesn't answer), so requiring X-Pigeon-CSRF blocks form-POST style attacks
+// even if SameSite=Lax is bypassed.
+const CSRF_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
 const dashFetch = async (url, opts = {}, onUnauthorized) => {
-  const res = await fetch(url, opts);
+  const method = (opts.method || 'GET').toUpperCase();
+  const headers = new Headers(opts.headers || {});
+  if (CSRF_METHODS.has(method) && !headers.has('X-Pigeon-CSRF')) {
+    headers.set('X-Pigeon-CSRF', '1');
+  }
+  const res = await fetch(url, { ...opts, headers });
   if (res.status === 401 && onUnauthorized) {
     onUnauthorized();
   }
   return res;
 };
 
-function WorldMap({ nodes, onHover, hoveredCity, W=420, H=210 }) {
+function WorldMap({ nodes, onHover, hoveredCity, W = 420, H = 210 }) {
   return (
-    <div style={{ position:'relative', width:'100%', aspectRatio:`${W} / ${H}`, overflow:'hidden', border:'1px solid var(--border)', background:'linear-gradient(180deg, rgba(18,23,20,0.98), rgba(11,15,13,1))' }}>
-      <img
-        src="/world-map.png"
-        alt=""
-        style={{ position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'cover', opacity:0.34, filter:'grayscale(1) brightness(0.7) contrast(1.15)' }}
-      />
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ position:'absolute', inset:0, width:'100%', height:'100%', display:'block' }}>
+    <div className={styles.worldMap} style={{ aspectRatio: `${W} / ${H}` }}>
+      <img src="/world-map.png" alt="" className={styles.worldMapImg} />
+      <svg viewBox={`0 0 ${W} ${H}`} className={styles.worldMapSvg}>
         {[30,60,90,120,150].map(x => <line key={'vg'+x} x1={x/180*W} y1={0} x2={x/180*W} y2={H} stroke="rgba(255,255,255,0.04)" strokeWidth="0.5" />)}
         {[30,60,90,120,150,180,210,240,270,300,330].map(x => <line key={'vg2'+x} x1={x/360*W} y1={0} x2={x/360*W} y2={H} stroke="rgba(255,255,255,0.04)" strokeWidth="0.5" />)}
         {[H*0.25,H*0.5,H*0.75].map((y,i) => <line key={'hg'+i} x1={0} y1={y} x2={W} y2={y} stroke="rgba(255,255,255,0.04)" strokeWidth="0.5" />)}
         {nodes.map((n, i) => {
-          const {x, y} = latLonToXY(n.lat, n.lon, W, H);
+          const { x, y } = latLonToXY(n.lat, n.lon, W, H);
           const isHovered = hoveredCity === n.key;
           const r = Math.min(2.5 + n.users * 0.32, 6.5);
           return (
-            <g key={n.key} onMouseEnter={() => onHover(n)} onMouseLeave={() => onHover(null)} style={{cursor:'pointer'}}>
-              <circle cx={x} cy={y} r={r+4} fill="none" stroke="var(--accent)" strokeWidth="0.8" opacity="0.3">
-                <animate attributeName="r" values={`${r+2};${r+10};${r+2}`} dur={`${2+i*0.3}s`} repeatCount="indefinite"/>
-                <animate attributeName="opacity" values="0.4;0;0.4" dur={`${2+i*0.3}s`} repeatCount="indefinite"/>
+            <g key={n.key} onMouseEnter={() => onHover(n)} onMouseLeave={() => onHover(null)} className={styles.worldNode}>
+              <circle cx={x} cy={y} r={r + 4} fill="none" stroke="var(--accent)" strokeWidth="0.8" opacity="0.3">
+                <animate attributeName="r" values={`${r+2};${r+10};${r+2}`} dur={`${2+i*0.3}s`} repeatCount="indefinite" />
+                <animate attributeName="opacity" values="0.4;0;0.4" dur={`${2+i*0.3}s`} repeatCount="indefinite" />
               </circle>
-              <circle cx={x} cy={y} r={r} fill={isHovered ? '#fff' : 'var(--accent)'} opacity={isHovered?1:0.9} />
-              {n.users > 5 && <text x={x} y={y+0.5} textAnchor="middle" dominantBaseline="middle" fontSize="3.5" fontFamily="monospace" fontWeight="700" fill="#000">{n.users}</text>}
+              <circle cx={x} cy={y} r={r} fill={isHovered ? '#fff' : 'var(--accent)'} opacity={isHovered ? 1 : 0.9} />
+              {n.users > 5 && <text x={x} y={y + 0.5} textAnchor="middle" dominantBaseline="middle" fontSize="3.5" fontFamily="monospace" fontWeight="700" fill="#000">{n.users}</text>}
             </g>
           );
         })}
@@ -98,7 +106,7 @@ const STATUS_CLASS_COLORS = {
 function TunnelCharts({ entries }) {
   if (!entries || entries.length === 0) {
     return (
-      <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-dim)', fontSize:12, padding:24, textAlign:'center' }}>
+      <div className={styles.chartsPlaceholder}>
         No request data yet. Once traffic hits the tunnel, charts will appear here.
       </div>
     );
@@ -121,8 +129,6 @@ function TunnelCharts({ entries }) {
   const errorRate = total > 0 ? (errors / total) * 100 : 0;
   const totalBytes = parsed.reduce((s, e) => s + e.bytes, 0);
 
-  // Bucket into 30-second bins covering the last 10 minutes so the sparkline
-  // renders even when the traffic stream is bursty.
   const bins = 20;
   const windowMs = 10 * 60 * 1000;
   const binMs = windowMs / bins;
@@ -136,12 +142,10 @@ function TunnelCharts({ entries }) {
   });
   const maxCount = Math.max(1, ...perBin.map(b => b.count));
 
-  // Status-class breakdown.
   const classes = { '2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0, '1xx': 0 };
   parsed.forEach(e => { classes[STATUS_CLASS(e.status)] = (classes[STATUS_CLASS(e.status)] || 0) + 1; });
   const classEntries = Object.entries(classes).filter(([, v]) => v > 0);
 
-  // Top paths by count.
   const byPath = {};
   parsed.forEach(e => {
     const key = `${e.method} ${e.path}`;
@@ -150,41 +154,36 @@ function TunnelCharts({ entries }) {
   const topPaths = Object.entries(byPath).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
   return (
-    <div style={{ flex:1, overflowY:'auto', padding:16, display:'flex', flexDirection:'column', gap:16 }}>
-      {/* Stat cards */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:8 }}>
+    <div className={styles.chartsBody}>
+      <div className={styles.statCards}>
         <StatCard label="Requests"    value={total.toLocaleString()} />
         <StatCard label="Avg Latency" value={`${Math.round(avgLatency)}ms`} />
         <StatCard label="p95 Latency" value={`${Math.round(p95Latency)}ms`} accent={p95Latency > 500 ? '#f5c542' : undefined} />
-        <StatCard label="Error Rate"  value={`${errorRate.toFixed(1)}%`}  accent={errorRate > 5 ? '#ff4d4d' : '#00e87a'} />
+        <StatCard label="Error Rate"  value={`${errorRate.toFixed(1)}%`} accent={errorRate > 5 ? '#ff4d4d' : '#00e87a'} />
       </div>
 
-      {/* Request rate (per 30s, last 10min) */}
       <ChartCard title="Requests · last 10 min" right={`${formatBytesShort(totalBytes)} transferred`}>
         <RequestRateChart bins={perBin} max={maxCount} />
       </ChartCard>
 
-      {/* Latency timeline */}
       <ChartCard title="Latency" right={`avg ${Math.round(avgLatency)}ms · p95 ${Math.round(p95Latency)}ms`}>
         <LatencyChart points={parsed.slice(-60)} />
       </ChartCard>
 
-      {/* Status mix */}
       <ChartCard title="Status codes" right={`${total} samples`}>
         <StatusBreakdown entries={classEntries} total={total} />
       </ChartCard>
 
-      {/* Top paths */}
       <ChartCard title="Top paths">
         {topPaths.length === 0 ? (
-          <div style={{ color:'var(--text-dim)', fontSize:11, padding:'8px 2px' }}>No HTTP activity yet.</div>
+          <div className={styles.chartEmpty}>No HTTP activity yet.</div>
         ) : topPaths.map(([k, n]) => (
-          <div key={k} style={{ display:'flex', alignItems:'center', gap:8, padding:'4px 0' }}>
-            <span style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--text)', flex:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{k}</span>
-            <div style={{ flex:1, height:6, background:'var(--panel2)', border:'1px solid var(--border)', position:'relative' }}>
-              <div style={{ position:'absolute', inset:0, width:`${(n / topPaths[0][1]) * 100}%`, background:'var(--accent)' }} />
+          <div key={k} className={styles.topPathRow}>
+            <span className={styles.topPathKey}>{k}</span>
+            <div className={styles.topPathBar}>
+              <div className={styles.topPathFill} style={{ width: `${(n / topPaths[0][1]) * 100}%` }} />
             </div>
-            <span style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--text-dim)', width:36, textAlign:'right' }}>{n}</span>
+            <span className={styles.topPathCount}>{n}</span>
           </div>
         ))}
       </ChartCard>
@@ -194,19 +193,19 @@ function TunnelCharts({ entries }) {
 
 function StatCard({ label, value, accent }) {
   return (
-    <div style={{ background:'var(--panel2)', border:'1px solid var(--border)', padding:'10px 12px' }}>
-      <div style={{ fontSize:10, fontWeight:600, letterSpacing:'.07em', textTransform:'uppercase', color:'var(--text-dim)' }}>{label}</div>
-      <div style={{ fontFamily:'var(--mono)', fontSize:15, fontWeight:600, color: accent || '#fff', marginTop:3 }}>{value}</div>
+    <div className={styles.statCard}>
+      <div className={styles.statCardLabel}>{label}</div>
+      <div className={styles.statCardValue} style={accent ? { color: accent } : undefined}>{value}</div>
     </div>
   );
 }
 
 function ChartCard({ title, right, children }) {
   return (
-    <div style={{ background:'var(--panel2)', border:'1px solid var(--border)', padding:12 }}>
-      <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:8 }}>
-        <span style={{ fontSize:10, fontWeight:600, letterSpacing:'.07em', textTransform:'uppercase', color:'var(--text-dim)' }}>{title}</span>
-        {right && <span style={{ fontFamily:'var(--mono)', fontSize:10, color:'var(--text-dim)' }}>{right}</span>}
+    <div className={styles.chartCard}>
+      <div className={styles.chartCardHeader}>
+        <span className={styles.chartCardTitle}>{title}</span>
+        {right && <span className={styles.chartCardRight}>{right}</span>}
       </div>
       {children}
     </div>
@@ -217,7 +216,7 @@ function RequestRateChart({ bins, max }) {
   const W = 488, H = 60, gap = 2;
   const bw = (W - gap * (bins.length - 1)) / bins.length;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', height:H, display:'block' }}>
+    <svg viewBox={`0 0 ${W} ${H}`} className={styles.chartSvg} style={{ height: H }}>
       {bins.map((b, i) => {
         const h = b.count === 0 ? 0 : Math.max(2, (b.count / max) * (H - 4));
         const errorH = b.errors === 0 ? 0 : Math.max(1, (b.errors / max) * (H - 4));
@@ -237,7 +236,7 @@ function RequestRateChart({ bins, max }) {
 
 function LatencyChart({ points }) {
   if (points.length < 2) {
-    return <div style={{ color:'var(--text-dim)', fontSize:11, padding:'8px 2px' }}>Need more samples to plot.</div>;
+    return <div className={styles.chartEmpty}>Need more samples to plot.</div>;
   }
   const W = 488, H = 80;
   const xs = points.map((_, i) => (i / (points.length - 1)) * W);
@@ -246,7 +245,7 @@ function LatencyChart({ points }) {
   const d = points.map((_, i) => `${i === 0 ? 'M' : 'L'} ${xs[i]} ${ys[i]}`).join(' ');
   const fill = `${d} L ${W} ${H} L 0 ${H} Z`;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', height:H, display:'block' }}>
+    <svg viewBox={`0 0 ${W} ${H}`} className={styles.chartSvg} style={{ height: H }}>
       <path d={fill} fill="var(--accent)" opacity="0.15" />
       <path d={d} fill="none" stroke="var(--accent)" strokeWidth="1.5" />
       {points.map((p, i) => (
@@ -259,18 +258,18 @@ function LatencyChart({ points }) {
 
 function StatusBreakdown({ entries, total }) {
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
-      <div style={{ display:'flex', height:10, border:'1px solid var(--border)', overflow:'hidden' }}>
+    <div className={styles.statusBreakdown}>
+      <div className={styles.statusBar}>
         {entries.map(([k, v]) => (
-          <div key={k} title={`${k}: ${v}`} style={{ width:`${(v / total) * 100}%`, background: STATUS_CLASS_COLORS[k] || '#9ba39c' }} />
+          <div key={k} title={`${k}: ${v}`} style={{ width: `${(v / total) * 100}%`, background: STATUS_CLASS_COLORS[k] || '#9ba39c' }} />
         ))}
       </div>
-      <div style={{ display:'flex', flexWrap:'wrap', gap:10, marginTop:4 }}>
+      <div className={styles.statusLegend}>
         {entries.map(([k, v]) => (
-          <div key={k} style={{ display:'flex', alignItems:'center', gap:5, fontFamily:'var(--mono)', fontSize:11 }}>
-            <span style={{ width:8, height:8, background: STATUS_CLASS_COLORS[k] || '#9ba39c', display:'inline-block' }} />
-            <span style={{ color:'var(--text)' }}>{k}</span>
-            <span style={{ color:'var(--text-dim)' }}>{v}</span>
+          <div key={k} className={styles.statusLegendItem}>
+            <span className={styles.statusSwatch} style={{ background: STATUS_CLASS_COLORS[k] || '#9ba39c' }} />
+            <span className={styles.statusKey}>{k}</span>
+            <span className={styles.statusCount}>{v}</span>
           </div>
         ))}
       </div>
@@ -297,12 +296,9 @@ function TunnelDetail({ tunnel, onClose, dashFetch }) {
   const [hoveredCity, setHoveredCity] = useState(null);
   const [tooltip, setTooltip] = useState(null);
   const [visitors, setVisitors] = useState([]);
-  const [entries, setEntries] = useState([]); // raw inspector entries for charts
+  const [entries, setEntries] = useState([]);
   const panelRef = useRef(null);
 
-  // Dismiss the panel on any mousedown outside its DOM subtree. Clicking a
-  // different tunnel row will still open that tunnel — the row's onClick
-  // fires after mousedown and re-sets selectedTunnel.
   useEffect(() => {
     if (!tunnel) return;
     const onDown = (e) => {
@@ -310,14 +306,10 @@ function TunnelDetail({ tunnel, onClose, dashFetch }) {
         onClose();
       }
     };
-    // mousedown (not click) so the dismiss fires before another row's onClick
-    // lets React re-render — gives a snappier feel than waiting for mouseup.
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
   }, [tunnel, onClose]);
 
-  // Details (charts are embedded below the metadata) and Visitors both read
-  // from /api/inspector, so share one poll.
   useEffect(() => {
     if (!tunnel || (tab !== 'visitors' && tab !== 'details')) return;
     const filter = tunnel.publicUrl || tunnel.id;
@@ -356,8 +348,8 @@ function TunnelDetail({ tunnel, onClose, dashFetch }) {
   if (!tunnel) return null;
 
   const tabs = [
-    { id:'details',  label:'Details' },
-    { id:'visitors', label:'Visitors' },
+    { id: 'details', label: 'Details' },
+    { id: 'visitors', label: 'Visitors' },
   ];
   const nodes = Object.values(visitors.reduce((acc, visitor) => {
     if (visitor.lat == null || visitor.lon == null) return acc;
@@ -383,7 +375,7 @@ function TunnelDetail({ tunnel, onClose, dashFetch }) {
   const now = Date.now();
   const activeUsers = new Set(visitors.filter(v => {
     const t = new Date(v.time).getTime();
-    return t && now-t <= activeWindowMs;
+    return t && now - t <= activeWindowMs;
   }).map(v => v.ip)).size;
   const totalCountries = new Set(visitors.map(v => v.countryCode || v.country).filter(Boolean)).size;
   const avgDurationMs = visitors.length ? Math.round(visitors.reduce((sum, v) => sum + (v.durationMs || 0), 0) / visitors.length) : 0;
@@ -395,26 +387,30 @@ function TunnelDetail({ tunnel, onClose, dashFetch }) {
   }
 
   return (
-    <div ref={panelRef} className="tunnel-detail-panel" style={{ position:'absolute', right:0, top:0, bottom:0, width: 520, background:'var(--panel)', borderLeft:'1px solid var(--border2)', display:'flex', flexDirection:'column', zIndex:50, animation:'slideIn .18s ease', transition:'width .2s ease' }}>
-      <div style={{ padding:'14px 20px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:10, flexShrink:0 }}>
+    <div ref={panelRef} className={styles.detailPanel}>
+      <div className={styles.detailHeader}>
         <StatusDot status={tunnel.status} />
-        <span style={{ flex:1, fontSize:14, fontWeight:600, color:'#fff' }}>Local Target: {tunnel.localPort}</span>
-        <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-dim)' }}><Icon d={Icons.x} size={16} color="currentColor" /></button>
+        <span className={styles.detailTitle}>Local Target: {tunnel.localPort}</span>
+        <button onClick={onClose} className={styles.closeBtn}>
+          <Icon d={Icons.x} size={16} color="currentColor" />
+        </button>
       </div>
 
-      <div style={{ display:'flex', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
+      <div className={styles.tabRow}>
         {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            style={{ flex:1, padding:'8px 0', background:'none', border:'none', borderBottom:`2px solid ${tab===t.id?'var(--accent)':'transparent'}`, color:tab===t.id?'var(--accent)':'var(--text-dim)', fontSize:12, cursor:'pointer', fontFamily:'var(--sans)', fontWeight:tab===t.id?500:400, marginBottom:-1, transition:'all .12s' }}>
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`${styles.tabBtn} ${tab === t.id ? styles.tabBtnActive : ''}`}
+          >
             {t.label}
           </button>
         ))}
       </div>
 
       {tab === 'details' && (
-        <div style={{ flex: 1, overflowY: 'auto' }}>
-          {/* ── Metadata summary ─────────────────────────────────────── */}
-          <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px 20px' }}>
+        <div className={styles.detailBody}>
+          <div className={styles.metadataGrid}>
             {[
               ['ID', tunnel.id],
               ['Protocol', tunnel.proto.toUpperCase()],
@@ -424,75 +420,91 @@ function TunnelDetail({ tunnel, onClose, dashFetch }) {
               ['Bandwidth', tunnel.bandwidth],
             ].map(([k, v]) => (
               <div key={k}>
-                <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 3 }}>{k}</div>
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text)', wordBreak: 'break-all' }}>{v}</div>
+                <div className={styles.metaLabel}>{k}</div>
+                <div className={styles.metaValue}>{v}</div>
               </div>
             ))}
-            <div style={{ gridColumn: '1 / -1' }}>
-              <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 3 }}>Public Endpoint</div>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text)', wordBreak: 'break-all' }}>
+            <div className={styles.metaFull}>
+              <div className={styles.metaLabel}>Public Endpoint</div>
+              <div className={styles.metaValue}>
                 {tunnel.publicUrl ? (
-                  <a href={`${tunnel.urlScheme}://${tunnel.publicUrl}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-mid)', textDecoration: 'none', borderBottom: '1px solid transparent', transition: 'all .1s' }} onMouseEnter={e=>{e.target.style.color='var(--accent)'; e.target.style.borderBottom='1px solid var(--accent)';}} onMouseLeave={e=>{e.target.style.color='var(--text-mid)'; e.target.style.borderBottom='1px solid transparent';}}>{`${tunnel.urlScheme}://${tunnel.publicUrl}`}</a>
+                  <a
+                    href={`${tunnel.urlScheme}://${tunnel.publicUrl}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={styles.endpointLink}
+                  >
+                    {`${tunnel.urlScheme}://${tunnel.publicUrl}`}
+                  </a>
                 ) : 'auto-assigned (start daemon)'}
               </div>
             </div>
           </div>
 
-          {/* ── Charts derived from /api/inspector ──────────────────── */}
           <TunnelCharts entries={entries} />
         </div>
       )}
 
       {tab === 'visitors' && (
-        <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
-          <div style={{ display:'flex', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
+        <div className={styles.visitorsTab}>
+          <div className={styles.visitorStats}>
             {[
-              { label:'Active Users', value: activeUsers, accent:true },
-              { label:'Countries', value: totalCountries },
-              { label:'Avg Session', value: avgSession },
-            ].map((s,i) => (
-              <div key={i} style={{ flex:1, padding:'10px 14px', borderRight: i<2 ? '1px solid var(--border)' : 'none' }}>
-                <div style={{ fontSize:10, fontWeight:600, letterSpacing:'.07em', textTransform:'uppercase', color:'var(--text-dim)' }}>{s.label}</div>
-                <div style={{ fontFamily:'var(--mono)', fontSize:16, fontWeight:600, color: s.accent ? 'var(--accent)' : '#fff', marginTop:2 }}>{s.value}</div>
+              { label: 'Active Users', value: activeUsers, accent: true },
+              { label: 'Countries', value: totalCountries },
+              { label: 'Avg Session', value: avgSession },
+            ].map((s, i) => (
+              <div key={i} className={`${styles.visitorStatCell} ${i < 2 ? styles.visitorStatCellBorder : ''}`}>
+                <div className={styles.visitorStatLabel}>{s.label}</div>
+                <div className={`${styles.visitorStatValue} ${s.accent ? styles.visitorStatAccent : ''}`}>{s.value}</div>
               </div>
             ))}
           </div>
 
-          <div style={{ padding:'12px 16px 0', position:'relative', flexShrink:0 }}>
+          <div className={styles.mapWrap}>
             <WorldMap nodes={nodes} onHover={handleMapHover} hoveredCity={hoveredCity} />
             {tooltip && (() => {
-              const {x, y} = latLonToXY(tooltip.lat, tooltip.lon, 420, 210);
+              const { x, y } = latLonToXY(tooltip.lat, tooltip.lon, 420, 210);
               const pct = x / 420;
               return (
-                <div style={{ position:'absolute', top: `${(y/210)*100}%`, left:`calc(${pct*100}% + 8px)`, transform:'translateY(-50%)', background:'var(--panel2)', border:'1px solid var(--border2)', padding:'8px 10px', pointerEvents:'none', zIndex:10, minWidth:140 }}>
-                  <div style={{ fontSize:12, fontWeight:600, color:'#fff', marginBottom:4 }}>{tooltip.flag} {tooltip.city}</div>
-                  <div style={{ fontFamily:'var(--mono)', fontSize:10, color:'var(--accent)', marginBottom:2 }}>{tooltip.users} active users</div>
-                  <div style={{ fontSize:10, color:'var(--text-dim)' }}>{tooltip.country || 'Unknown'}</div>
+                <div
+                  className={styles.mapTooltip}
+                  style={{
+                    top: `${(y / 210) * 100}%`,
+                    left: `calc(${pct * 100}% + 8px)`,
+                  }}
+                >
+                  <div className={styles.tooltipTitle}>{tooltip.flag} {tooltip.city}</div>
+                  <div className={styles.tooltipCount}>{tooltip.users} active users</div>
+                  <div className={styles.tooltipSub}>{tooltip.country || 'Unknown'}</div>
                 </div>
               );
             })()}
           </div>
 
-          <div style={{ flex:1, overflowY:'auto', borderTop:'1px solid var(--border)', marginTop:8 }}>
-            <div style={{ padding:'6px 16px', display:'flex', alignItems:'center', justifyContent:'space-between', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
-              <span style={{ fontSize:10, fontWeight:600, letterSpacing:'.07em', textTransform:'uppercase', color:'var(--text-dim)' }}>Live Connections</span>
-              <span style={{ display:'flex', alignItems:'center', gap:4, fontSize:10, color:'var(--accent)', fontFamily:'var(--mono)' }}>
-                <span style={{ width:5, height:5, borderRadius:'50%', background:'var(--accent)', display:'inline-block', animation:'pulse 1.5s ease infinite' }}/>
+          <div className={styles.visitorsList}>
+            <div className={styles.visitorsListHeader}>
+              <span className={styles.visitorsListHeaderLabel}>Live Connections</span>
+              <span className={styles.liveLabel}>
+                <span className={styles.liveDotSmall} />
                 LIVE
               </span>
             </div>
             {visitors.length === 0 ? (
-              <div style={{ padding:'20px 16px', color:'var(--text-dim)', fontSize:12 }}>No visitor data yet. Open the tunnel and generate a few requests.</div>
+              <div className={styles.visitorsEmpty}>No visitor data yet. Open the tunnel and generate a few requests.</div>
             ) : visitors.map((v, i) => (
-              <div key={v.id || i} style={{ display:'grid', gridTemplateColumns:'26px 1fr 60px', gap:'0 8px', padding:'7px 16px', borderBottom:'1px solid var(--border)', alignItems:'center', background: i===0 ? 'var(--accent-dim)' : 'transparent', transition:'background .4s' }}>
-                <span style={{ fontSize:14 }}>{v.flag}</span>
+              <div
+                key={v.id || i}
+                className={`${styles.visitorRow} ${i === 0 ? styles.visitorRowFresh : ''}`}
+              >
+                <span className={styles.visitorFlag}>{v.flag}</span>
                 <div>
-                  <div style={{ fontSize:12, color:'#fff', fontWeight:500 }}>{v.city}
-                    <span style={{ fontFamily:'var(--mono)', fontSize:10, color:'var(--text-dim)', marginLeft:6 }}>{v.ip}</span>
+                  <div className={styles.visitorName}>
+                    {v.city}
+                    <span className={styles.visitorIp}>{v.ip}</span>
                   </div>
-                  <div style={{ fontSize:10, color:'var(--text-dim)', marginTop:1 }}>{v.browser} · {v.os}</div>
+                  <div className={styles.visitorAgent}>{v.browser} · {v.os}</div>
                 </div>
-                <div style={{ textAlign:'right', fontFamily:'var(--mono)', fontSize:10, color: i===0?'var(--accent)':'var(--text-dim)' }}>{v.ago}</div>
+                <div className={`${styles.visitorAgo} ${i === 0 ? styles.visitorAgoFresh : ''}`}>{v.ago}</div>
               </div>
             ))}
           </div>
@@ -505,17 +517,18 @@ function TunnelDetail({ tunnel, onClose, dashFetch }) {
 function StatsBar({ tunnels, server, version }) {
   const online = tunnels.length;
   const totalReqs = tunnels.reduce((a, t) => a + t.requests, 0);
+  const cells = [
+    { label: 'Active Tunnels', value: `${online} connected`, accent: true },
+    { label: 'Total Mocks', value: totalReqs.toLocaleString() },
+    { label: 'Agent', value: version || 'dev' },
+    { label: 'Pigeon Server', value: server || 'Unknown Server' },
+  ];
   return (
-    <div className="stats-bar" style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', flexShrink: 0, background: 'var(--panel)' }}>
-      {[
-        { label: 'Active Tunnels', value: `${online} connected`, accent: true },
-        { label: 'Total Mocks', value: totalReqs.toLocaleString() },
-        { label: 'Agent', value: version || 'dev' },
-        { label: 'Pigeon Server', value: server || 'Unknown Server' },
-      ].map((s, i) => (
-        <div key={i} style={{ padding: '8px 24px', borderRight: '1px solid var(--border)', minWidth: 120 }}>
-          <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-dim)' }}>{s.label}</div>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 500, color: s.accent ? 'var(--accent)' : 'var(--text)', marginTop: 2 }}>{s.value}</div>
+    <div className={styles.statsBar}>
+      {cells.map((s, i) => (
+        <div key={i} className={styles.statCell}>
+          <div className={styles.statLabel}>{s.label}</div>
+          <div className={`${styles.statValue} ${s.accent ? styles.statValueAccent : ''}`}>{s.value}</div>
         </div>
       ))}
     </div>
@@ -540,7 +553,7 @@ export function App() {
   const [tunnels, setTunnels] = useState([]);
   const [rawConfig, setRawConfig] = useState(null);
   const [selectedTunnel, setSelectedTunnel] = useState(null);
-  const [isAuthorized, setIsAuthorized] = useState(null); // null = checking
+  const [isAuthorized, setIsAuthorized] = useState(null);
   const [initError, setInitError] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -565,16 +578,16 @@ export function App() {
   const loadConfig = async () => {
     try {
       const res = await wrappedFetch('/api/config');
-      if(!res.ok) {
+      if (!res.ok) {
         const txt = await res.text();
-        if(txt.includes('not initialised')) setInitError(txt);
+        if (txt.includes('not initialised')) setInitError(txt);
         throw new Error(txt);
       }
       setInitError(null);
       setIsAuthorized(true);
       const cfg = await res.json();
       setRawConfig(cfg);
-      
+
       const isLocal = !!cfg.local_dev;
       const baseDomain = cfg.base_domain || '';
       const parsedTunnels = (cfg.forwards || []).map(f => {
@@ -583,10 +596,6 @@ export function App() {
         const expose = f.expose || 'both';
         const httpLike = f.protocol === 'http' || f.protocol === 'https' || f.protocol === 'static';
         if (httpLike) {
-          // Only show a URL the server has actually assigned. Don't guess from
-          // forward_id — the server picks a random 8-char subdomain unrelated
-          // to the id, so a speculative fallback would point at a non-existent
-          // tunnel and cause "tunnel not found" on click.
           let raw = f.public_addr || f.domain || null;
           if (raw && baseDomain && !raw.endsWith('.' + baseDomain) && raw !== baseDomain) raw = `${raw}.${baseDomain}`;
           pubUrl = raw;
@@ -624,7 +633,7 @@ export function App() {
       });
       setTunnels(parsedTunnels);
 
-    } catch(err) {
+    } catch (err) {
       console.error("Config fetch error", err);
     } finally {
       setLoading(false);
@@ -635,7 +644,7 @@ export function App() {
     loadConfig();
   }, []);
 
-  if (isAuthorized === null) return null; // wait for first auth check before rendering anything
+  if (isAuthorized === null) return null;
 
   if (!isAuthorized) {
     return <LoginView onLogin={() => { setIsAuthorized(true); loadConfig(); }} />;
@@ -643,23 +652,21 @@ export function App() {
 
   if (initError) {
     return (
-      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', color: '#fff', flexDirection: 'column', gap: 20 }}>
+      <div className={styles.initScreen}>
         <Icon d={Icons.zap} size={48} color="var(--accent)" />
-        <div style={{ fontSize: 24, fontWeight: 600 }}>Daemon Not Initialized</div>
-        <div style={{ color: 'var(--text-mid)', fontFamily: 'var(--mono)', fontSize: 13, background: 'var(--panel)', padding: '16px 24px', border: '1px solid var(--border)' }}>
-          {initError}
-        </div>
-        <button onClick={loadConfig} style={{ background: 'none', border: '1px solid var(--border2)', color: 'var(--text-dim)', padding: '8px 16px', cursor: 'pointer', marginTop: 10 }}>Retry Connection</button>
+        <div className={styles.initTitle}>Daemon Not Initialized</div>
+        <div className={styles.initMessage}>{initError}</div>
+        <button onClick={loadConfig} className={styles.retryBtn}>Retry Connection</button>
       </div>
     );
   }
 
   return (
-    <div className="app-layout" style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+    <div className={styles.appLayout}>
       <StatsBar tunnels={tunnels} server={rawConfig?.server} version={rawConfig?.version} />
-      <div className="app-layout" style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
+      <div className={styles.appBody}>
         <Sidebar active={activeNav} setActive={v => { window.location.hash = v; setSelectedTunnel(null); }} onLogout={handleLogout} />
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+        <div className={styles.appMain}>
           {activeNav === 'tunnels' && <TunnelsView tunnels={tunnels} loading={loading} reloadConfig={loadConfig} onSelectTunnel={t => setSelectedTunnel(t)} baseDomain={rawConfig?.base_domain || ''} dashFetch={wrappedFetch} />}
           {activeNav === 'inspector' && <InspectorView tunnels={tunnels} dashFetch={wrappedFetch} />}
           {activeNav === 'logs' && <LogsView dashFetch={wrappedFetch} />}
@@ -670,4 +677,3 @@ export function App() {
     </div>
   );
 }
-

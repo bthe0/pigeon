@@ -11,11 +11,47 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
 
 const daemonEnvKey = "PIGEON_DAEMON"
+
+// Tunneling pause/resume state shared between the web API handlers and
+// DaemonRun's connection loop. Paused is true when the user has stopped
+// tunneling from the dashboard; the loop then blocks on daemonResume instead
+// of reconnecting. currentClient holds the live connection (if any) so
+// DaemonPause can cut it and force the loop to re-evaluate paused state.
+var (
+	daemonPaused  atomic.Bool
+	daemonResume  = make(chan struct{}, 1)
+	currentClient atomic.Pointer[Client]
+)
+
+// DaemonIsPaused reports whether tunneling is currently paused.
+func DaemonIsPaused() bool {
+	return daemonPaused.Load()
+}
+
+// DaemonPause stops the tunneling loop without killing the daemon process.
+// The web UI stays reachable. The current client connection (if any) is
+// closed so Connect returns and the loop falls through to the paused wait.
+func DaemonPause() {
+	daemonPaused.Store(true)
+	if c := currentClient.Load(); c != nil {
+		c.Close()
+	}
+}
+
+// DaemonResume clears the paused flag and wakes the loop's resume wait.
+func DaemonResume() {
+	daemonPaused.Store(false)
+	select {
+	case daemonResume <- struct{}{}:
+	default:
+	}
+}
 
 // IsDaemon returns true when the current process is running as the daemon.
 func IsDaemon() bool {
@@ -189,6 +225,22 @@ func DaemonRun(cfg *Config) {
 
 	attempt := 0
 	for {
+		// If the user stopped tunneling from the dashboard, block here until
+		// they resume (or until a config reload nudges us — config changes
+		// are pointless while paused but we still want to exit promptly if
+		// resume happens via a fresh reload signal).
+		if daemonPaused.Load() {
+			log.Printf("Tunneling paused — waiting for resume")
+			select {
+			case <-daemonResume:
+				log.Printf("Tunneling resumed")
+				attempt = 0
+			case <-reload:
+				// Reload while paused: stay paused, just loop to re-check.
+				continue
+			}
+		}
+
 		// Always reload config from disk so edits made via web UI are picked up.
 		if fresh, err := LoadConfig(); err == nil {
 			cfg = fresh
@@ -214,6 +266,7 @@ func DaemonRun(cfg *Config) {
 					}
 				}
 			}
+			currentClient.Store(c)
 			done := make(chan struct{})
 			go func() {
 				if err := c.Connect(); err != nil {
@@ -224,14 +277,22 @@ func DaemonRun(cfg *Config) {
 			}()
 			select {
 			case <-done:
+				currentClient.Store(nil)
 			case <-reload:
 				c.Close()
+				currentClient.Store(nil)
 				// Small delay to ensure Web UI has finished saving config.json
 				time.Sleep(100 * time.Millisecond)
 				log.Printf("Config reloaded — reconnecting...")
 				attempt = 0
 				continue
 			}
+		}
+
+		// If DaemonPause closed the client above, skip the backoff and jump
+		// back to the paused wait at the top of the loop.
+		if daemonPaused.Load() {
+			continue
 		}
 
 		attempt++

@@ -1,4 +1,5 @@
 import { Icon, Icons } from './Icons';
+import styles from './Sidebar.module.css';
 
 export function Sidebar({ active, setActive, onLogout }) {
   const nav = [
@@ -8,37 +9,37 @@ export function Sidebar({ active, setActive, onLogout }) {
     { id: 'settings', icon: Icons.settings, label: 'Settings' },
   ];
   return (
-    <div className="sidebar" style={{ width: 200, background: 'var(--panel)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
-      {/* Logo — click returns to the Tunnels home view. */}
-      <button onClick={() => setActive('tunnels')} className="sidebar-header"
-        aria-label="Go to Tunnels home"
-        style={{ padding: '20px 16px 16px', textAlign: 'left', background: 'none', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit', width: '100%' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <img src="/logo.png" alt="Pigeon logo" style={{ width: 28, height: 28, objectFit: 'contain', flexShrink: 0 }} />
-          <span style={{ fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 14, letterSpacing: '.06em', color: '#fff' }}>pigeon</span>
+    <div className={styles.sidebar}>
+      <button onClick={() => setActive('tunnels')} className={styles.header} aria-label="Go to Tunnels home">
+        <div className={styles.headerRow}>
+          <img src="/logo.png" alt="Pigeon logo" className={styles.logo} />
+          <span className={styles.brand}>pigeon</span>
         </div>
-        <div style={{ marginTop: 4, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>tunnel agent connected</div>
+        <div className={styles.tagline}>tunnel agent connected</div>
       </button>
 
-      <div className="sidebar-system" style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>
-        <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 500 }}>System</div>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 4 }}>
+      <div className={styles.system}>
+        <div className={styles.systemLabel}>System</div>
+        <div className={styles.systemValue}>
           <Icon d={Icons.globe} size={11} color="var(--accent)" />
           Local Agent
         </div>
       </div>
 
-      <nav style={{ flex: 1, padding: '8px 0', display: 'flex', flexDirection: 'column' }}>
+      <nav className={styles.nav}>
         {nav.map(n => (
-          <button key={n.id} onClick={() => setActive(n.id)} className="sidebar-nav-btn" data-active={active === n.id}
-            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 16px', background: active === n.id ? 'var(--accent-dim)' : 'none', border: 'none', borderLeft: `2px solid ${active === n.id ? 'var(--accent)' : 'transparent'}`, cursor: 'pointer', color: active === n.id ? 'var(--accent)' : 'var(--text-dim)', fontSize: 13, fontFamily: 'var(--sans)', fontWeight: active === n.id ? 500 : 400, textAlign: 'left', transition: 'all .12s' }}>
+          <button
+            key={n.id}
+            onClick={() => setActive(n.id)}
+            data-active={active === n.id}
+            className={`${styles.navBtn} ${active === n.id ? styles.navBtnActive : ''}`}
+          >
             <Icon d={n.icon} size={15} color="currentColor" />
             {n.label}
           </button>
         ))}
-        <div style={{ flex: 1 }} />
-        <button onClick={onLogout} className="sidebar-nav-btn"
-          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', background: 'none', border: 'none', borderTop: '1px solid var(--border)', cursor: 'pointer', color: 'var(--red)', fontSize: 13, fontFamily: 'var(--sans)', fontWeight: 400, textAlign: 'left', transition: 'all .12s' }}>
+        <div className={styles.navSpacer} />
+        <button onClick={onLogout} className={styles.logout}>
           <Icon d={Icons.x} size={15} color="currentColor" />
           Log Out
         </button>
@@ -46,4 +47,3 @@ export function Sidebar({ active, setActive, onLogout }) {
     </div>
   );
 }
-

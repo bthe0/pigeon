@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAuthorizeTunnelPassword_Bypass(t *testing.T) {
@@ -49,7 +50,7 @@ func TestAuthorizeTunnelPassword_CookieAuth(t *testing.T) {
 	fwd := &forward{id: "myfwd", httpPassword: "hunter2"}
 
 	cookieName := passwordCookieName(fwd)
-	cookieValue := passwordCookieValue(s.cfg.Token, fwd)
+	cookieValue := passwordCookieIssue(s.cfg.Token, fwd, time.Now())
 
 	t.Run("valid cookie", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -75,6 +76,16 @@ func TestAuthorizeTunnelPassword_CookieAuth(t *testing.T) {
 		w := httptest.NewRecorder()
 		if s.authorizeTunnelPassword(w, req, fwd) {
 			t.Fatal("expected false with wrong cookie name")
+		}
+	})
+
+	t.Run("stale cookie rejected", func(t *testing.T) {
+		stale := passwordCookieIssue(s.cfg.Token, fwd, time.Now().Add(-2*passwordCookieMaxAge))
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.AddCookie(&http.Cookie{Name: cookieName, Value: stale})
+		w := httptest.NewRecorder()
+		if s.authorizeTunnelPassword(w, req, fwd) {
+			t.Fatal("expected false for stale cookie")
 		}
 	})
 }
@@ -150,8 +161,8 @@ func TestAuthorizeTunnelPassword_CorrectPasswordRedirects(t *testing.T) {
 	for _, c := range cookies {
 		if c.Name == passwordCookieName(fwd) {
 			found = true
-			if c.Value != passwordCookieValue(s.cfg.Token, fwd) {
-				t.Errorf("cookie value mismatch: got %q", c.Value)
+			if !passwordCookieValidate(c.Value, s.cfg.Token, fwd, time.Now()) {
+				t.Errorf("issued cookie failed validation: %q", c.Value)
 			}
 		}
 	}
@@ -191,20 +202,37 @@ func TestAuthorizeTunnelPassword_RateLimiting(t *testing.T) {
 	}
 }
 
-func TestPasswordCookieValue_IsDeterministic(t *testing.T) {
+func TestPasswordCookie_FreshlyIssuedValidates(t *testing.T) {
 	fwd := &forward{id: "x", httpPassword: "pw"}
-	v1 := passwordCookieValue("token", fwd)
-	v2 := passwordCookieValue("token", fwd)
-	if v1 != v2 {
-		t.Errorf("passwordCookieValue not deterministic: %q != %q", v1, v2)
+	now := time.Now()
+	v := passwordCookieIssue("token", fwd, now)
+	if !passwordCookieValidate(v, "token", fwd, now) {
+		t.Errorf("freshly-issued cookie should validate; got rejected: %q", v)
 	}
 }
 
-func TestPasswordCookieValue_DiffersOnTokenChange(t *testing.T) {
+func TestPasswordCookie_RejectsOnTokenChange(t *testing.T) {
 	fwd := &forward{id: "x", httpPassword: "pw"}
-	v1 := passwordCookieValue("token1", fwd)
-	v2 := passwordCookieValue("token2", fwd)
-	if v1 == v2 {
-		t.Error("passwordCookieValue should differ when token changes")
+	now := time.Now()
+	v := passwordCookieIssue("token1", fwd, now)
+	if passwordCookieValidate(v, "token2", fwd, now) {
+		t.Error("cookie signed under token1 should not validate under token2")
+	}
+}
+
+func TestPasswordCookie_RejectsOnPasswordChange(t *testing.T) {
+	now := time.Now()
+	v := passwordCookieIssue("t", &forward{id: "x", httpPassword: "old"}, now)
+	if passwordCookieValidate(v, "t", &forward{id: "x", httpPassword: "new"}, now) {
+		t.Error("cookie signed under old password should not validate under new")
+	}
+}
+
+func TestPasswordCookie_ExpiresAfterMaxAge(t *testing.T) {
+	fwd := &forward{id: "x", httpPassword: "pw"}
+	past := time.Now().Add(-passwordCookieMaxAge - time.Minute)
+	v := passwordCookieIssue("token", fwd, past)
+	if passwordCookieValidate(v, "token", fwd, time.Now()) {
+		t.Error("cookie older than passwordCookieMaxAge should be rejected")
 	}
 }

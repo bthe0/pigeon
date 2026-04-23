@@ -2,7 +2,8 @@ package client
 
 import (
 	"bytes"
-	"crypto/sha256"
+	"crypto/rand"
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
@@ -11,6 +12,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -48,9 +50,85 @@ func OpenBrowser(url string) {
 	}
 }
 
-func sessionValue(password string) string {
-	sum := sha256.Sum256([]byte(password))
-	return hex.EncodeToString(sum[:])
+// sessionIdleTimeout bounds how long a dashboard session survives between
+// requests. The session's lastSeen is refreshed on every authed hit.
+const sessionIdleTimeout = 30 * 24 * time.Hour
+
+// sessionStore holds dashboard session IDs in memory. Session IDs are random
+// 32-byte values (hex-encoded) issued on successful login; they do not derive
+// from the password, so rotating the password, logging out, or restarting the
+// daemon all invalidate outstanding cookies. The previous implementation used
+// sha256(password) — a cookie that never changed until the password did —
+// which meant a captured cookie was equivalent to permanent access.
+type sessionStore struct {
+	mu       sync.Mutex
+	sessions map[string]time.Time // id → lastSeen
+}
+
+func newSessionStore() *sessionStore {
+	s := &sessionStore{sessions: make(map[string]time.Time)}
+	go s.gcLoop()
+	return s
+}
+
+func (s *sessionStore) gcLoop() {
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for range t.C {
+		cutoff := time.Now().Add(-sessionIdleTimeout)
+		s.mu.Lock()
+		for id, seen := range s.sessions {
+			if seen.Before(cutoff) {
+				delete(s.sessions, id)
+			}
+		}
+		s.mu.Unlock()
+	}
+}
+
+func (s *sessionStore) issue() (string, error) {
+	var buf [32]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", err
+	}
+	id := hex.EncodeToString(buf[:])
+	s.mu.Lock()
+	s.sessions[id] = time.Now()
+	s.mu.Unlock()
+	return id, nil
+}
+
+// validate reports whether id names a live session and, as a side effect,
+// bumps its lastSeen timestamp so active use extends the idle window.
+// Constant-time lookup is not required here because the sync-map key is
+// the caller-supplied cookie and `map` lookup already runs in constant
+// time over key length; the secret isn't the id itself but the presence of
+// a matching row in the map.
+func (s *sessionStore) validate(id string) bool {
+	if id == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen, ok := s.sessions[id]
+	if !ok {
+		return false
+	}
+	if time.Since(seen) > sessionIdleTimeout {
+		delete(s.sessions, id)
+		return false
+	}
+	s.sessions[id] = time.Now()
+	return true
+}
+
+func (s *sessionStore) revoke(id string) {
+	if id == "" {
+		return
+	}
+	s.mu.Lock()
+	delete(s.sessions, id)
+	s.mu.Unlock()
 }
 
 // configStore caches the active config in memory and auto-refreshes on an
@@ -151,8 +229,31 @@ func allowMethod(method string, h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// bindIsLoopback reports whether addr ("host:port") is bound to a loopback
+// interface. An empty or wildcard host (":8080", "0.0.0.0:8080", "[::]:8080")
+// counts as non-loopback since the dashboard becomes reachable beyond the
+// local machine.
+func bindIsLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "" {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return host == "localhost"
+}
+
 func StartWebInterface(addr string, openBrowser bool) error {
 	store := newConfigStore()
+	sessions := newSessionStore()
+
+	if !bindIsLoopback(addr) {
+		log.Printf("WARNING: web dashboard bound to %s — session cookie and API token traverse plaintext HTTP over the network. Bind to 127.0.0.1 or front with TLS.", addr)
+	}
 
 	mux := http.NewServeMux()
 	var handler http.Handler
@@ -171,6 +272,17 @@ func StartWebInterface(addr string, openBrowser bool) error {
 
 	mux.Handle("/", handler)
 
+	// stateChanging reports whether the method can mutate server state. We
+	// treat anything other than GET/HEAD/OPTIONS as potentially dangerous and
+	// require a CSRF header for cookie-authenticated callers.
+	stateChanging := func(method string) bool {
+		switch method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			return false
+		}
+		return true
+	}
+
 	auth := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			cfg := store.Load()
@@ -180,7 +292,17 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			}
 
 			if cookie, err := r.Cookie("pigeon_session"); err == nil {
-				if cookie.Value == sessionValue(cfg.DashboardPassword) {
+				if sessions.validate(cookie.Value) {
+					// Session-cookie callers must include a custom header on
+					// state-changing requests. Browsers cannot set arbitrary
+					// headers cross-origin without a CORS preflight (which
+					// this server does not answer), so this blocks the
+					// classic form-POST CSRF path even if SameSite enforcement
+					// lapses.
+					if stateChanging(r.Method) && r.Header.Get("X-Pigeon-CSRF") == "" {
+						http.Error(w, "missing X-Pigeon-CSRF header", http.StatusForbidden)
+						return
+					}
 					h(w, r)
 					return
 				}
@@ -190,7 +312,10 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			if strings.HasPrefix(token, "Bearer ") {
 				token = strings.TrimPrefix(token, "Bearer ")
 			}
-			if token != "" && token == cfg.Token {
+			if token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(cfg.Token)) == 1 {
+				// Bearer-token callers are non-browser; cross-site cookie-ride
+				// attacks don't apply, so we don't force the CSRF header on
+				// them.
 				h(w, r)
 				return
 			}
@@ -225,6 +350,7 @@ func StartWebInterface(addr string, openBrowser bool) error {
 		}
 		resp := map[string]interface{}{
 			"server":      cfg.Server,
+			"token":       cfg.Token,
 			"local_dev":   cfg.LocalDev,
 			"base_domain": cfg.BaseDomain,
 			"web_addr":    cfg.WebAddr,
@@ -248,26 +374,35 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			http.Error(w, "not initialised", http.StatusInternalServerError)
 			return
 		}
-		if p.Password == "" || p.Password != cfg.DashboardPassword {
+		if cfg.DashboardPassword == "" ||
+			subtle.ConstantTimeCompare([]byte(p.Password), []byte(cfg.DashboardPassword)) != 1 {
 			log.Printf("dashboard login rejected from %s", r.RemoteAddr)
 			http.Error(w, "invalid password", http.StatusUnauthorized)
+			return
+		}
+		sid, err := sessions.issue()
+		if err != nil {
+			http.Error(w, "session error", http.StatusInternalServerError)
 			return
 		}
 		log.Printf("dashboard login accepted from %s", r.RemoteAddr)
 
 		http.SetCookie(w, &http.Cookie{
 			Name:     "pigeon_session",
-			Value:    sessionValue(cfg.DashboardPassword),
+			Value:    sid,
 			Path:     "/",
 			HttpOnly: true,
 			Secure:   requestIsSecure(r),
-			MaxAge:   86400 * 30, // 30 days
+			MaxAge:   int(sessionIdleTimeout / time.Second),
 			SameSite: http.SameSiteLaxMode,
 		})
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})))
 
 	mux.HandleFunc("/api/logout", noCache(allowMethod(http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
+		if cookie, err := r.Cookie("pigeon_session"); err == nil {
+			sessions.revoke(cookie.Value)
+		}
 		http.SetCookie(w, &http.Cookie{
 			Name:     "pigeon_session",
 			Value:    "",
@@ -398,6 +533,83 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		w.WriteHeader(http.StatusOK)
+	}))))
+
+	// Daemon tunneling state: pause keeps the dashboard alive but stops the
+	// reconnect loop; resume kicks it back into Connect. Distinct from
+	// /api/restart which bounces the entire process.
+	mux.HandleFunc("GET /api/daemon/state", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"paused": DaemonIsPaused()})
+	})))
+	mux.HandleFunc("POST /api/daemon/stop", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
+		DaemonPause()
+		log.Printf("tunneling paused via dashboard")
+		w.WriteHeader(http.StatusOK)
+	})))
+	mux.HandleFunc("POST /api/daemon/start", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
+		DaemonResume()
+		log.Printf("tunneling resumed via dashboard")
+		w.WriteHeader(http.StatusOK)
+	})))
+
+	mux.HandleFunc("/api/token/validate", auth(noCache(allowMethod(http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
+		cfg := store.Load()
+		if cfg == nil {
+			http.Error(w, "not initialised", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := ValidateToken(cfg); err != nil {
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))))
+
+	mux.HandleFunc("/api/config/export", auth(noCache(allowMethod(http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
+		cfg := store.Load()
+		if cfg == nil {
+			http.Error(w, "not initialised", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", `attachment; filename="pigeon-config.json"`)
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(cfg)
+	}))))
+
+	mux.HandleFunc("/api/config/import", auth(noCache(allowMethod(http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+		if err != nil {
+			http.Error(w, "could not read body", http.StatusBadRequest)
+			return
+		}
+		var incoming Config
+		if err := json.Unmarshal(body, &incoming); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if incoming.Server == "" {
+			http.Error(w, "config missing required field: server", http.StatusBadRequest)
+			return
+		}
+		if incoming.Token == "" {
+			http.Error(w, "config missing required field: token", http.StatusBadRequest)
+			return
+		}
+		if err := store.Update(func(cfg *Config) error {
+			*cfg = incoming
+			return nil
+		}); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("config imported via dashboard (%d forwards)", len(incoming.Forwards))
+		DaemonReload()
 		w.WriteHeader(http.StatusOK)
 	}))))
 
