@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -332,16 +331,5 @@ func StartWebInterface(addr string, openBrowser bool) error {
 }
 
 func requestIsSecure(r *http.Request) bool {
-	if r.TLS != nil {
-		return true
-	}
-	if !strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
-		return false
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return false
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	return r.TLS != nil
 }

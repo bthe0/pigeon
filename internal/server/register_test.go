@@ -14,7 +14,8 @@ func TestRegisterForward_RandomSubdomainWhenEmpty(t *testing.T) {
 
 	p := &proto.ForwardPayload{
 		ID:       "fwd1",
-		Protocol: proto.ProtoHTTP,
+		Protocol:  proto.ProtoHTTP,
+		LocalAddr: "127.0.0.1:8080",
 	}
 	addr, err := s.registerForward(sess, p)
 	if err != nil {
@@ -35,7 +36,8 @@ func TestRegisterForward_CustomDomain_Valid(t *testing.T) {
 
 	p := &proto.ForwardPayload{
 		ID:       "fwd2",
-		Protocol: proto.ProtoHTTP,
+		Protocol:  proto.ProtoHTTP,
+		LocalAddr: "127.0.0.1:8080",
 		Domain:   "myapp.tun.example.com",
 	}
 	addr, err := s.registerForward(sess, p)
@@ -53,7 +55,8 @@ func TestRegisterForward_CustomDomain_Invalid(t *testing.T) {
 
 	p := &proto.ForwardPayload{
 		ID:       "fwd3",
-		Protocol: proto.ProtoHTTP,
+		Protocol:  proto.ProtoHTTP,
+		LocalAddr: "127.0.0.1:8080",
 		Domain:   "evil.com",
 	}
 	_, err := s.registerForward(sess, p)
@@ -69,7 +72,8 @@ func TestRegisterForward_NoDomainValidation_WhenNoDomain(t *testing.T) {
 
 	p := &proto.ForwardPayload{
 		ID:       "fwd4",
-		Protocol: proto.ProtoHTTP,
+		Protocol:  proto.ProtoHTTP,
+		LocalAddr: "127.0.0.1:8080",
 		Domain:   "anything.com",
 	}
 	_, err := s.registerForward(sess, p)

@@ -394,9 +394,18 @@ func webCmd() *cobra.Command {
 
 // ── pigeon dev ─────────────────────────────────────────────────────────────────
 
+// useDevConfig points PIGEON_CONFIG at dev.json so dev-mode config is fully
+// isolated from the user's real ~/.pigeon/config.json. Respects an already-set
+// PIGEON_CONFIG so watch-mode child processes inherit the same value.
+func useDevConfig() {
+	if os.Getenv("PIGEON_CONFIG") == "" {
+		os.Setenv("PIGEON_CONFIG", "dev.json")
+	}
+}
+
 func devCmd() *cobra.Command {
 	var controlAddr, httpAddr, httpsAddr, token, domain, certDir, logFile string
-	var watch, ui bool
+	var watch, ui, skipChildren bool
 
 	cmd := &cobra.Command{
 		Use:   "dev",
@@ -415,6 +424,7 @@ Example:
   sudo pigeon dev --token secret
   sudo pigeon dev --token secret --watch --ui`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			useDevConfig()
 			if watch {
 				return runDevWatch(devWatchArgs{
 					controlAddr: controlAddr,
@@ -451,15 +461,14 @@ Example:
 				}
 			}()
 
-			devCfg := &client.Config{
-				Server:     controlAddr,
-				Token:      token,
-				LocalDev:   true,
-				BaseDomain: domain,
+			devCfg, err := client.LoadConfig()
+			if err != nil {
+				devCfg = &client.Config{}
 			}
-			if existing, err := client.LoadConfig(); err == nil {
-				devCfg.Forwards = existing.Forwards
-			}
+			devCfg.Server = controlAddr
+			devCfg.Token = token
+			devCfg.LocalDev = true
+			devCfg.BaseDomain = domain
 			if err := client.SaveConfig(devCfg); err != nil {
 				log.Printf("Warning: could not save client config: %v", err)
 			}
@@ -480,8 +489,11 @@ Example:
 			})
 
 			// Start daemon and optional farm dev server as side processes.
-			children := startDevChildren(ui)
-			defer stopChildren(children)
+			// In watch mode the parent owns these so they survive server restarts.
+			if !skipChildren {
+				children := startDevChildren(ui)
+				defer stopChildren(children)
+			}
 
 			return s.Start()
 		},
@@ -521,6 +533,8 @@ Example:
 	cmd.PersistentFlags().StringVar(&logFile, "log", "", "Traffic log file (default: stdout)")
 	cmd.PersistentFlags().BoolVar(&watch, "watch", false, "Watch .go files and rebuild/restart on changes")
 	cmd.PersistentFlags().BoolVar(&ui, "ui", false, "Also run 'farm start' for frontend HMR")
+	cmd.PersistentFlags().BoolVar(&skipChildren, "skip-children", false, "Internal: skip starting daemon/farm (used by --watch supervisor)")
+	_ = cmd.PersistentFlags().MarkHidden("skip-children")
 	return cmd
 }
 
@@ -533,9 +547,45 @@ type devWatchArgs struct {
 }
 
 func runDevWatch(a devWatchArgs) error {
+	if a.token == "" {
+		return fmt.Errorf("--token is required")
+	}
+
 	root, err := findGoModDir()
 	if err != nil {
 		return fmt.Errorf("could not find project root (go.mod): %w\nrun pigeon dev --watch from the project directory", err)
+	}
+
+	certDir := a.certDir
+	if certDir == "" {
+		certDir = localdev.DefaultCertDir()
+	}
+	if _, _, err := localdev.GenerateCert(a.domain, certDir); err != nil {
+		return fmt.Errorf("generate cert: %w", err)
+	}
+	log.Printf("Self-signed cert written to %s", certDir)
+
+	if err := localdev.SetupResolver(a.domain); err != nil {
+		log.Printf("Warning: could not write /etc/resolver/%s (%v) — run with sudo", a.domain, err)
+	} else {
+		log.Printf("DNS resolver configured for *.%s", a.domain)
+	}
+	go func() {
+		if err := localdev.StartDNS(a.domain); err != nil {
+			log.Printf("DNS server error: %v", err)
+		}
+	}()
+
+	devCfg, err := client.LoadConfig()
+	if err != nil {
+		devCfg = &client.Config{}
+	}
+	devCfg.Server = a.controlAddr
+	devCfg.Token = a.token
+	devCfg.LocalDev = true
+	devCfg.BaseDomain = a.domain
+	if err := client.SaveConfig(devCfg); err != nil {
+		log.Printf("Warning: could not save client config: %v", err)
 	}
 
 	tmpBin := filepath.Join(os.TempDir(), fmt.Sprintf("pigeon-dev-%d", os.Getpid()))
@@ -556,9 +606,8 @@ func runDevWatch(a devWatchArgs) error {
 		"--control", a.controlAddr,
 		"--http", a.httpAddr,
 		"--https", a.httpsAddr,
-	}
-	if a.certDir != "" {
-		childArgs = append(childArgs, "--cert-dir", a.certDir)
+		"--cert-dir", certDir,
+		"--skip-children",
 	}
 	if a.logFile != "" {
 		childArgs = append(childArgs, "--log", a.logFile)

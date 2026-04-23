@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,6 +18,10 @@ type geoInfo struct {
 	Latitude    float64
 	Longitude   float64
 }
+
+// geoLookupInFlight tracks IPs with an in-flight background lookup to
+// dedupe concurrent requests for the same IP.
+var geoLookupInFlight sync.Map // ip -> struct{}
 
 type ipAPIResponse struct {
 	Status      string  `json:"status"`
@@ -80,6 +85,10 @@ func clientIP(remoteAddr string, header http.Header) string {
 	return remoteAddr
 }
 
+// lookupGeo returns cached geo data for ip immediately. If the IP is not
+// cached, an empty geoInfo is returned and a background lookup is scheduled
+// so subsequent requests for the same IP can be answered from cache. This
+// keeps the request path off the external HTTP dependency.
 func (s *Server) lookupGeo(ip string) geoInfo {
 	if ip == "" {
 		return geoInfo{}
@@ -90,23 +99,32 @@ func (s *Server) lookupGeo(ip string) geoInfo {
 
 	parsed := net.ParseIP(ip)
 	if parsed != nil && (parsed.IsLoopback() || parsed.IsPrivate()) {
-		info := geoInfo{City: "Local", Country: "Local", CountryCode: "LO", Latitude: 0, Longitude: 0}
+		info := geoInfo{City: "Local", Country: "Local", CountryCode: "LO"}
 		s.geoCache.Store(ip, info)
 		return info
 	}
 
+	if _, loaded := geoLookupInFlight.LoadOrStore(ip, struct{}{}); !loaded {
+		go s.fetchGeoAsync(ip)
+	}
+	return geoInfo{}
+}
+
+func (s *Server) fetchGeoAsync(ip string) {
+	defer geoLookupInFlight.Delete(ip)
+
 	if pauseUntil := time.Unix(s.geoPauseUntil.Load(), 0); time.Now().Before(pauseUntil) {
-		return geoInfo{}
+		return
 	}
 
 	client := &http.Client{Timeout: 2 * time.Second}
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://ip-api.com/json/%s?fields=status,message,country,countryCode,city,lat,lon", ip), nil)
 	if err != nil {
-		return geoInfo{}
+		return
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return geoInfo{}
+		return
 	}
 	defer resp.Body.Close()
 
@@ -116,24 +134,22 @@ func (s *Server) lookupGeo(ip string) geoInfo {
 				s.geoPauseUntil.Store(time.Now().Add(time.Duration(secs) * time.Second).Unix())
 			}
 		}
-		return geoInfo{}
+		return
 	}
 
 	var body ipAPIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return geoInfo{}
+		return
 	}
 	if body.Status != "success" {
-		return geoInfo{}
+		return
 	}
 
-	info := geoInfo{
+	s.geoCache.Store(ip, geoInfo{
 		City:        body.City,
 		Country:     body.Country,
 		CountryCode: body.CountryCode,
 		Latitude:    body.Lat,
 		Longitude:   body.Lon,
-	}
-	s.geoCache.Store(ip, info)
-	return info
+	})
 }

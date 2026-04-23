@@ -49,7 +49,19 @@ func configDir() (string, error) {
 	return dir, nil
 }
 
+// ConfigPath returns the active config file. Honors PIGEON_CONFIG (a filename
+// under ~/.pigeon, or an absolute path). Defaults to ~/.pigeon/config.json.
 func ConfigPath() (string, error) {
+	if v := os.Getenv("PIGEON_CONFIG"); v != "" {
+		if filepath.IsAbs(v) {
+			return v, nil
+		}
+		dir, err := configDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(dir, v), nil
+	}
 	dir, err := configDir()
 	if err != nil {
 		return "", err
@@ -66,12 +78,24 @@ func LogDir() (string, error) {
 	return logDir, os.MkdirAll(logDir, 0755)
 }
 
+// PIDFile returns a PID file path derived from the active config filename so
+// dev and prod daemons don't clash (e.g. config.json → pigeon.pid,
+// dev.json → pigeon-dev.pid).
 func PIDFile() (string, error) {
+	cfgPath, err := ConfigPath()
+	if err != nil {
+		return "", err
+	}
 	dir, err := configDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "pigeon.pid"), nil
+	base := filepath.Base(cfgPath)
+	name := strings.TrimSuffix(base, filepath.Ext(base))
+	if name == "config" {
+		return filepath.Join(dir, "pigeon.pid"), nil
+	}
+	return filepath.Join(dir, "pigeon-"+name+".pid"), nil
 }
 
 func LoadConfig() (*Config, error) {

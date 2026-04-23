@@ -14,6 +14,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -56,6 +57,11 @@ type Config struct {
 	CertFile    string // path to TLS cert PEM (overrides ACME)
 	KeyFile     string // path to TLS key PEM (overrides ACME)
 	LogFile     string // path to traffic log file, "" = stdout
+
+	// TrustedProxyCIDRs lists CIDRs whose X-Forwarded-Proto header is trusted
+	// when determining whether a request arrived over TLS. Requests from any
+	// other source are only considered secure when r.TLS is set.
+	TrustedProxyCIDRs []string
 
 	// OnForwardRegistered is called whenever an HTTP tunnel domain is registered.
 	// Used in local-dev mode to add /etc/hosts entries dynamically.
@@ -101,8 +107,8 @@ type Server struct {
 	logFile       io.WriteCloser
 	geoCache      sync.Map // ip -> geoInfo
 	geoPauseUntil atomic.Int64
-	passwordFails sync.Map // "fwdID:ip" -> *passwordRateEntry
-	passwordSweep atomic.Int64
+	passwordFails  sync.Map // "fwdID:ip" -> *passwordRateEntry
+	trustedProxies []*net.IPNet
 }
 
 type passwordRateEntry struct {
@@ -125,6 +131,25 @@ func New(cfg Config) *Server {
 		}
 	}
 	s.logger = log.New(w, "", 0)
+
+	for _, c := range cfg.TrustedProxyCIDRs {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		if _, n, err := net.ParseCIDR(c); err == nil {
+			s.trustedProxies = append(s.trustedProxies, n)
+		} else if ip := net.ParseIP(c); ip != nil {
+			bits := 32
+			if ip.To4() == nil {
+				bits = 128
+			}
+			mask := net.CIDRMask(bits, bits)
+			s.trustedProxies = append(s.trustedProxies, &net.IPNet{IP: ip, Mask: mask})
+		} else {
+			log.Printf("warning: ignoring invalid TrustedProxyCIDR %q", c)
+		}
+	}
 	return s
 }
 
@@ -132,6 +157,7 @@ func New(cfg Config) *Server {
 func (s *Server) Start() error {
 	errCh := make(chan error, 3)
 
+	go s.cleanupLoop()
 	go func() { errCh <- s.serveControl() }()
 	go func() { errCh <- s.serveHTTP() }()
 	if s.cfg.HTTPSAddr != "" && s.cfg.Domain != "" {
@@ -234,6 +260,14 @@ func (s *Server) handleClient(conn net.Conn) {
 // ── Forward management ─────────────────────────────────────────────────────────
 
 func (s *Server) registerForward(sess *session, p *proto.ForwardPayload) (string, error) {
+	if p.LocalAddr == "" {
+		return "", fmt.Errorf("local address required")
+	}
+	if _, port, err := net.SplitHostPort(p.LocalAddr); err != nil || port == "" {
+		return "", fmt.Errorf("invalid local address %q: must be host:port", p.LocalAddr)
+	} else if _, err := strconv.Atoi(port); err != nil {
+		return "", fmt.Errorf("invalid local address %q: port must be numeric", p.LocalAddr)
+	}
 	fwd := &forward{
 		id:              p.ID,
 		protocol:        p.Protocol,
@@ -470,7 +504,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	fwd := v.(*forward)
 
-	isTLS := requestIsSecure(r)
+	isTLS := s.requestIsSecure(r)
 
 	// Default to HTTPS if expose is empty or explicitly set to both
 	expose := fwd.expose
@@ -683,7 +717,7 @@ func (s *Server) authorizeTunnelPassword(w http.ResponseWriter, r *http.Request,
 					Value:    passwordCookieValue(s.cfg.Token, fwd),
 					Path:     "/",
 					HttpOnly: true,
-					Secure:   requestIsSecure(r),
+					Secure:   s.requestIsSecure(r),
 					SameSite: http.SameSiteLaxMode,
 				})
 				w.Header().Set("Cache-Control", "no-store")
@@ -701,7 +735,6 @@ const passwordMaxFails = 10
 const passwordLockDuration = 15 * time.Minute
 
 func (s *Server) isPasswordRateLimited(key string) bool {
-	s.sweepPasswordFails()
 	v, _ := s.passwordFails.LoadOrStore(key, &passwordRateEntry{})
 	e := v.(*passwordRateEntry)
 	e.mu.Lock()
@@ -711,7 +744,6 @@ func (s *Server) isPasswordRateLimited(key string) bool {
 }
 
 func (s *Server) recordPasswordFail(key string) {
-	s.sweepPasswordFails()
 	v, _ := s.passwordFails.LoadOrStore(key, &passwordRateEntry{})
 	e := v.(*passwordRateEntry)
 	e.mu.Lock()
@@ -727,30 +759,30 @@ func (s *Server) clearPasswordFails(key string) {
 	s.passwordFails.Delete(key)
 }
 
-func (s *Server) sweepPasswordFails() {
-	now := time.Now().UnixNano()
-	last := s.passwordSweep.Load()
-	if last != 0 && now-last < int64(5*time.Minute) {
-		return
+func (s *Server) cleanupLoop() {
+	t := time.NewTicker(10 * time.Minute)
+	defer t.Stop()
+	for range t.C {
+		cutoff := time.Now().Add(-passwordLockDuration)
+		s.passwordFails.Range(func(k, v any) bool {
+			e := v.(*passwordRateEntry)
+			e.mu.Lock()
+			stale := !e.lastSeen.IsZero() && e.lastSeen.Before(cutoff)
+			e.mu.Unlock()
+			if stale {
+				s.passwordFails.Delete(k)
+			}
+			return true
+		})
 	}
-	if !s.passwordSweep.CompareAndSwap(last, now) {
-		return
-	}
-	s.passwordFails.Range(func(k, v any) bool {
-		e := v.(*passwordRateEntry)
-		e.mu.Lock()
-		stale := !e.lastSeen.IsZero() && time.Since(e.lastSeen) > passwordLockDuration
-		e.mu.Unlock()
-		if stale {
-			s.passwordFails.Delete(k)
-		}
-		return true
-	})
 }
 
-func requestIsSecure(r *http.Request) bool {
+func (s *Server) requestIsSecure(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
+	}
+	if len(s.trustedProxies) == 0 {
+		return false
 	}
 	if !strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 		return false
@@ -760,7 +792,15 @@ func requestIsSecure(r *http.Request) bool {
 		return false
 	}
 	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	if ip == nil {
+		return false
+	}
+	for _, n := range s.trustedProxies {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 func passwordCookieName(fwd *forward) string {
