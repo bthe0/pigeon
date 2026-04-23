@@ -10,6 +10,7 @@ import (
 
 func serverCmd() *cobra.Command {
 	var controlAddr, httpAddr, httpsAddr, token, domain, certDir, logFile string
+	var trustedProxies []string
 
 	cmd := &cobra.Command{
 		Use:   "server",
@@ -27,13 +28,14 @@ func serverCmd() *cobra.Command {
 			os.MkdirAll(certDir, 0700)
 
 			s := server.New(server.Config{
-				ControlAddr: controlAddr,
-				HTTPAddr:    httpAddr,
-				HTTPSAddr:   httpsAddr,
-				Token:       token,
-				Domain:      domain,
-				CertDir:     certDir,
-				LogFile:     logFile,
+				ControlAddr:       controlAddr,
+				HTTPAddr:          httpAddr,
+				HTTPSAddr:         httpsAddr,
+				Token:             token,
+				Domain:            domain,
+				CertDir:           certDir,
+				LogFile:           logFile,
+				TrustedProxyCIDRs: trustedProxies,
 			})
 			return s.Start()
 		},
@@ -46,5 +48,6 @@ func serverCmd() *cobra.Command {
 	cmd.Flags().StringVar(&domain, "domain", "", "Base domain, e.g. tun.example.com (required)")
 	cmd.Flags().StringVar(&certDir, "cert-dir", "", "Directory for ACME certs")
 	cmd.Flags().StringVar(&logFile, "log", "", "Traffic log file (default: stdout)")
+	cmd.Flags().StringSliceVar(&trustedProxies, "trusted-proxy", nil, "CIDR(s) whose X-Forwarded-Proto is trusted (repeatable or comma-separated)")
 	return cmd
 }
