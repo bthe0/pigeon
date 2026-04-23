@@ -178,8 +178,16 @@ func TestNewInspectorWriter_CreatesRestrictedFile(t *testing.T) {
 	}
 	defer iw.Close()
 
-	path := filepath.Join(dir, ".pigeon", "logs", "inspector.ndjson")
-	info, err := os.Stat(path)
+	// Inspector logs rotate daily — match today's dated file.
+	logsDir := filepath.Join(dir, ".pigeon", "logs")
+	matches, err := filepath.Glob(filepath.Join(logsDir, "inspector-*.ndjson"))
+	if err != nil {
+		t.Fatalf("glob inspector logs: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 inspector log file, got %d (%v)", len(matches), matches)
+	}
+	info, err := os.Stat(matches[0])
 	if err != nil {
 		t.Fatalf("stat inspector log: %v", err)
 	}

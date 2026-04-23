@@ -21,21 +21,25 @@ func IsDaemon() bool {
 	return os.Getenv(daemonEnvKey) == "1"
 }
 
-// DaemonStart forks the current binary as a background daemon.
+// DaemonStart forks the current binary as a background daemon. Uses
+// O_CREATE|O_EXCL on the PID file as a lock: if two processes race, only
+// one wins the open and the other returns "already running".
 func DaemonStart() error {
 	pidFile, err := PIDFile()
 	if err != nil {
 		return err
 	}
 
-	if pid, err := readPID(pidFile); err == nil {
-		if processRunning(pid) {
-			return fmt.Errorf("daemon already running (PID %d)", pid)
-		}
+	pf, err := acquirePIDFile(pidFile)
+	if err != nil {
+		return err
 	}
+	// At this point we own pf. On any error below we must remove the pid file.
+	cleanup := func() { pf.Close(); os.Remove(pidFile) }
 
 	exe, err := os.Executable()
 	if err != nil {
+		cleanup()
 		return err
 	}
 
@@ -45,11 +49,13 @@ func DaemonStart() error {
 
 	logDir, err := LogDir()
 	if err != nil {
+		cleanup()
 		return err
 	}
 	logPath := filepath.Join(logDir, "daemon.log")
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
+		cleanup()
 		return err
 	}
 
@@ -61,13 +67,30 @@ func DaemonStart() error {
 
 	if err := cmd.Start(); err != nil {
 		f.Close()
+		cleanup()
 		return fmt.Errorf("start daemon: %w", err)
 	}
 	f.Close()
 
-	if err := writePID(pidFile, cmd.Process.Pid); err != nil {
+	// Overwrite the parent PID we stamped during acquirePIDFile with the
+	// child's real PID. Seek+Truncate so the new content fully replaces the
+	// old rather than getting appended.
+	if _, err := pf.Seek(0, 0); err != nil {
+		pf.Close()
+		os.Remove(pidFile)
 		return err
 	}
+	if err := pf.Truncate(0); err != nil {
+		pf.Close()
+		os.Remove(pidFile)
+		return err
+	}
+	if _, err := fmt.Fprintf(pf, "%d", cmd.Process.Pid); err != nil {
+		pf.Close()
+		os.Remove(pidFile)
+		return err
+	}
+	pf.Close()
 
 	fmt.Printf("Daemon started (PID %d)\nLogs: %s\n", cmd.Process.Pid, logPath)
 	return nil
@@ -234,6 +257,44 @@ func processRunning(pid int) bool {
 		return false
 	}
 	return proc.Signal(syscall.Signal(0)) == nil
+}
+
+// acquirePIDFile opens path with O_CREATE|O_EXCL as a mutual-exclusion lock
+// and stamps our own PID into it immediately. Stamping is what makes the
+// exclusion usable under races: a concurrent caller that finds the file
+// already exists will see a valid running PID (ours) rather than an empty
+// file it could otherwise treat as stale.
+//
+// Stale files (owner no longer running, or malformed) are removed and the
+// open retried exactly once. Callers later overwrite our parent PID with the
+// child's PID via writePID, which truncates before writing.
+func acquirePIDFile(path string) (*os.File, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		pf, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err == nil {
+			if _, werr := fmt.Fprintf(pf, "%d", os.Getpid()); werr != nil {
+				pf.Close()
+				os.Remove(path)
+				return nil, werr
+			}
+			return pf, nil
+		}
+		if !os.IsExist(err) {
+			return nil, err
+		}
+		if attempt > 0 {
+			return nil, fmt.Errorf("acquire pid file %s: %w", path, err)
+		}
+		// PID file exists. If the owner is still running, refuse to take over.
+		if existing, rerr := readPID(path); rerr == nil && processRunning(existing) {
+			return nil, fmt.Errorf("daemon already running (PID %d)", existing)
+		}
+		if rmErr := os.Remove(path); rmErr != nil {
+			return nil, fmt.Errorf("stale pid file %s: %w", path, rmErr)
+		}
+	}
+	// Unreachable under the two-attempt loop.
+	return nil, fmt.Errorf("acquire pid file %s", path)
 }
 
 func filterArgs(args []string, remove ...string) []string {

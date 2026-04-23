@@ -5,6 +5,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/bthe0/pigeon/internal/netx"
 	"github.com/bthe0/pigeon/internal/proto"
 )
 
@@ -51,7 +52,7 @@ func BenchmarkCopyStream(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		r := &benchReader{data: data}
 		w := &benchWriter{}
-		copyStream(w, r)
+		netx.Copy(w, r)
 		if w.n != len(data) {
 			b.Fatal(w.n)
 		}

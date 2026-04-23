@@ -11,8 +11,15 @@ const hostsFile = "/etc/hosts"
 const pigeonMarker = "# pigeon-local"
 
 // AddHost adds "127.0.0.1 hostname" to /etc/hosts if not already present.
-func AddHost(hostname string) error {
-	entries, err := readHosts()
+func AddHost(hostname string) error { return addHostAt(hostsFile, hostname) }
+
+// RemoveHosts removes all pigeon-managed entries from /etc/hosts.
+func RemoveHosts() error { return removeHostsAt(hostsFile) }
+
+// addHostAt and removeHostsAt take an explicit path so tests can exercise
+// the rewrite logic without touching the real /etc/hosts.
+func addHostAt(path, hostname string) error {
+	entries, err := readHosts(path)
 	if err != nil {
 		return err
 	}
@@ -23,12 +30,11 @@ func AddHost(hostname string) error {
 		}
 	}
 	entries = append(entries, line)
-	return writeHosts(entries)
+	return writeHosts(path, entries)
 }
 
-// RemoveHosts removes all pigeon-managed entries from /etc/hosts.
-func RemoveHosts() error {
-	entries, err := readHosts()
+func removeHostsAt(path string) error {
+	entries, err := readHosts(path)
 	if err != nil {
 		return err
 	}
@@ -38,11 +44,11 @@ func RemoveHosts() error {
 			kept = append(kept, e)
 		}
 	}
-	return writeHosts(kept)
+	return writeHosts(path, kept)
 }
 
-func readHosts() ([]string, error) {
-	f, err := os.Open(hostsFile)
+func readHosts(path string) ([]string, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +61,7 @@ func readHosts() ([]string, error) {
 	return lines, sc.Err()
 }
 
-func writeHosts(lines []string) error {
+func writeHosts(path string, lines []string) error {
 	content := strings.Join(lines, "\n") + "\n"
-	return os.WriteFile(hostsFile, []byte(content), 0644)
+	return os.WriteFile(path, []byte(content), 0644)
 }

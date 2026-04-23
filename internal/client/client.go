@@ -10,29 +10,18 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/bthe0/pigeon/internal/netx"
 	"github.com/bthe0/pigeon/internal/proto"
 	"github.com/hashicorp/yamux"
 )
 
-var streamCopyBufferPool = sync.Pool{
-	New: func() any {
-		b := make([]byte, 32*1024)
-		return &b
-	},
-}
-
-func copyStream(dst io.Writer, src io.Reader) {
-	buf := streamCopyBufferPool.Get().(*[]byte)
-	defer streamCopyBufferPool.Put(buf)
-	_, _ = io.CopyBuffer(dst, src, *buf)
-}
-
 // Client manages a single connection to the pigeon server.
 type Client struct {
 	cfg          *Config
-	forwardIndex map[string]*ForwardRule
+	forwardIndex atomic.Pointer[map[string]*ForwardRule] // read by accept goroutines, swapped by control loop
 	mux          *yamux.Session
 	ctrl         net.Conn
 	logger       *log.Logger
@@ -61,18 +50,20 @@ func New(cfg *Config) (*Client, error) {
 }
 
 func (c *Client) rebuildForwardIndex() {
-	c.forwardIndex = make(map[string]*ForwardRule, len(c.cfg.Forwards))
+	idx := make(map[string]*ForwardRule, len(c.cfg.Forwards))
 	for i := range c.cfg.Forwards {
 		fwd := &c.cfg.Forwards[i]
-		c.forwardIndex[fwd.ID] = fwd
+		idx[fwd.ID] = fwd
 	}
+	c.forwardIndex.Store(&idx)
 }
 
 func (c *Client) lookupForward(id string) *ForwardRule {
-	if c.forwardIndex == nil {
+	idx := c.forwardIndex.Load()
+	if idx == nil {
 		return nil
 	}
-	return c.forwardIndex[id]
+	return (*idx)[id]
 }
 
 // Connect dials the server, authenticates, and registers all forwards.
@@ -172,29 +163,8 @@ func (c *Client) controlLoop() error {
 			log.Printf("server error: %s", e.Message)
 		case proto.MsgInspectorEvent:
 			var e proto.InspectorEventPayload
-			if err := proto.DecodePayload(msg, &e); err == nil {
-				if c.inspector != nil {
-					_ = c.inspector.Write(InspectorEntry{
-						Time:            e.Time,
-						ForwardID:       e.ForwardID,
-						Domain:          e.Domain,
-						RemoteAddr:      e.RemoteAddr,
-						Method:          e.Method,
-						Path:            e.Path,
-						Status:          e.Status,
-						DurationMs:      e.DurationMs,
-						Bytes:           e.Bytes,
-						City:            e.City,
-						Country:         e.Country,
-						CountryCode:     e.CountryCode,
-						Latitude:        e.Latitude,
-						Longitude:       e.Longitude,
-						Browser:         e.Browser,
-						OS:              e.OS,
-						RequestHeaders:  e.RequestHeaders,
-						ResponseHeaders: e.ResponseHeaders,
-					})
-				}
+			if err := proto.DecodePayload(msg, &e); err == nil && c.inspector != nil {
+				_ = c.inspector.Write(e)
 			}
 		case proto.MsgPing:
 			proto.Write(c.ctrl, proto.Message{Type: proto.MsgPong})
@@ -257,15 +227,7 @@ func (c *Client) handleTCPStream(stream net.Conn, rule *ForwardRule, hdr proto.S
 	defer local.Close()
 
 	c.logTraffic(rule, hdr.RemoteAddr, string(hdr.Protocol), "CONNECT", 0)
-
-	done := make(chan struct{}, 2)
-	cp := func(dst io.Writer, src io.Reader) {
-		copyStream(dst, src)
-		done <- struct{}{}
-	}
-	go cp(stream, local)
-	go cp(local, stream)
-	<-done
+	netx.Proxy(stream, local)
 }
 
 // handleUDPStream tunnels UDP traffic using a NAT-table pattern.
@@ -342,26 +304,9 @@ func (c *Client) handleUDPStream(stream net.Conn, rule *ForwardRule) {
 }
 
 func (c *Client) sendForwardAdd(rule ForwardRule) error {
-	domain := rule.Domain
-	// For HTTP tunnels with no explicit domain, reuse the previously-assigned
-	// subdomain (saved in PublicAddr) so the URL stays stable across restarts.
-	if domain == "" && rule.PublicAddr != "" &&
-		(rule.Protocol == proto.ProtoHTTP || rule.Protocol == proto.ProtoHTTPS) {
-		domain = rule.PublicAddr
-	}
 	return proto.Write(c.ctrl, proto.Message{
-		Type: proto.MsgForwardAdd,
-		Payload: proto.ForwardPayload{
-			ID:              rule.ID,
-			Protocol:        rule.Protocol,
-			LocalAddr:       rule.LocalAddr,
-			Domain:          domain,
-			RemotePort:      rule.RemotePort,
-			Expose:          rule.Expose,
-			HTTPPassword:    rule.HTTPPassword,
-			MaxConnections:  rule.MaxConnections,
-			UnavailablePage: rule.UnavailablePage,
-		},
+		Type:    proto.MsgForwardAdd,
+		Payload: rule.ToPayload(),
 	})
 }
 

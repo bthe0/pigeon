@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"embed"
@@ -47,7 +48,72 @@ func sessionValue(password string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// configStore caches the active config in memory so every API request doesn't
+// re-read ~/.pigeon/config.json from disk. Saves go through Update which
+// persists to disk and refreshes the cached copy atomically.
+//
+// The store tolerates a missing config file — cfg is simply nil until either
+// an Update call writes one or the user runs `pigeon init`. Handlers must
+// nil-check before dereferencing.
+type configStore struct {
+	mu  sync.RWMutex
+	cfg *Config
+}
+
+func newConfigStore() *configStore {
+	s := &configStore{}
+	if cfg, err := LoadConfig(); err == nil {
+		s.cfg = cfg
+	}
+	return s
+}
+
+func (s *configStore) Load() *Config {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cfg
+}
+
+// Update mutates the cached config via fn, persists to disk, and replaces the
+// cached pointer. If no config is loaded yet, fn runs against an empty
+// Config — letting the first Update initialise the file.
+func (s *configStore) Update(fn func(*Config) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var working Config
+	if s.cfg != nil {
+		working = *s.cfg
+		working.Forwards = append([]ForwardRule(nil), s.cfg.Forwards...)
+	}
+
+	if err := fn(&working); err != nil {
+		return err
+	}
+	if err := SaveConfig(&working); err != nil {
+		return err
+	}
+	s.cfg = &working
+	return nil
+}
+
+// allowMethod returns 405 for any method other than `method` and otherwise
+// delegates to h. Used for single-method endpoints where relying on Go 1.22
+// method-aware routing would let the "/" file-server catch-all swallow
+// mismatches as 404.
+func allowMethod(method string, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != method {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h(w, r)
+	}
+}
+
 func StartWebInterface(addr string, openBrowser bool) error {
+	store := newConfigStore()
+
 	mux := http.NewServeMux()
 	var handler http.Handler
 
@@ -65,11 +131,10 @@ func StartWebInterface(addr string, openBrowser bool) error {
 
 	mux.Handle("/", handler)
 
-	// Auth middleware
 	auth := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			cfg, err := LoadConfig()
-			if err != nil {
+			cfg := store.Load()
+			if cfg == nil {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
@@ -101,41 +166,36 @@ func StartWebInterface(addr string, openBrowser bool) error {
 		}
 	}
 
-	mux.HandleFunc("/api/config", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
-		cfg, err := LoadConfig()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+	// ── API routes ───────────────────────────────────────────────────────────
+	// Single-method endpoints use allowMethod to emit proper 405s. Multi-method
+	// endpoints (/api/forwards, /api/forwards/{id}) use Go 1.22 method-aware
+	// patterns — the mux returns 405 automatically when the path is known but
+	// the method isn't.
 
-		metrics, _ := GetMetrics()
-		if metrics != nil {
-			for i := range cfg.Forwards {
-				if m, ok := metrics[cfg.Forwards[i].ID]; ok {
-					cfg.Forwards[i].RequestCount = m.Requests
-					cfg.Forwards[i].ByteCount = m.Bytes
+	mux.HandleFunc("/api/config", auth(noCache(allowMethod(http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
+		cfg := store.Load()
+		forwards := append([]ForwardRule(nil), cfg.Forwards...)
+		if metrics, _ := GetMetrics(); metrics != nil {
+			for i := range forwards {
+				if m, ok := metrics[forwards[i].ID]; ok {
+					forwards[i].RequestCount = m.Requests
+					forwards[i].ByteCount = m.Bytes
 				}
 			}
 		}
-
 		resp := map[string]interface{}{
 			"server":      cfg.Server,
 			"local_dev":   cfg.LocalDev,
 			"base_domain": cfg.BaseDomain,
 			"web_addr":    cfg.WebAddr,
-			"forwards":    cfg.Forwards,
+			"forwards":    forwards,
 			"version":     AgentVersion,
 		}
-
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
-	})))
+	}))))
 
-	mux.HandleFunc("/api/login", noCache(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
+	mux.HandleFunc("/api/login", noCache(allowMethod(http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
 		var p struct {
 			Password string `json:"password"`
 		}
@@ -143,8 +203,8 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		cfg, err := LoadConfig()
-		if err != nil {
+		cfg := store.Load()
+		if cfg == nil {
 			http.Error(w, "not initialised", http.StatusInternalServerError)
 			return
 		}
@@ -163,9 +223,9 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			SameSite: http.SameSiteLaxMode,
 		})
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	}))
+	})))
 
-	mux.HandleFunc("/api/logout", noCache(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/logout", noCache(allowMethod(http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{
 			Name:     "pigeon_session",
 			Value:    "",
@@ -177,9 +237,9 @@ func StartWebInterface(addr string, openBrowser bool) error {
 		})
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	}))
+	})))
 
-	mux.HandleFunc("/api/logs", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/logs", auth(noCache(allowMethod(http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
 		filter := r.URL.Query().Get("filter")
 		logs, err := FetchRecentLogs(filter, 100)
 		if err != nil {
@@ -188,9 +248,9 @@ func StartWebInterface(addr string, openBrowser bool) error {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(logs)
-	})))
+	}))))
 
-	mux.HandleFunc("/api/inspector", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/inspector", auth(noCache(allowMethod(http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
 		filter := r.URL.Query().Get("filter")
 		entries, err := FetchRecentInspectorEntries(100, filter)
 		if err != nil {
@@ -199,57 +259,57 @@ func StartWebInterface(addr string, openBrowser bool) error {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(entries)
-	})))
+	}))))
 
-	mux.HandleFunc("/api/forwards", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "POST" {
-			var rule ForwardRule
-			if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			if rule.ID == "" {
-				rule.ID = proto.RandomID(8)
-			}
-			cfg, _ := LoadConfig()
-			if err := cfg.AddForward(rule); err != nil {
-				http.Error(w, err.Error(), http.StatusConflict)
-				return
-			}
-			if err := SaveConfig(cfg); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			DaemonReload()
-			w.WriteHeader(http.StatusCreated)
+	// /api/forwards supports POST; /api/forwards/{id} supports DELETE and PUT.
+	// Register both with method-aware patterns so the mux auto-emits 405 for
+	// unsupported methods.
+	mux.HandleFunc("POST /api/forwards", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
+		var rule ForwardRule
+		if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		if rule.ID == "" {
+			rule.ID = proto.RandomID(8)
+		}
+		if err := store.Update(func(cfg *Config) error { return cfg.AddForward(rule) }); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		DaemonReload()
+		w.WriteHeader(http.StatusCreated)
 	})))
 
-	mux.HandleFunc("/api/forwards/", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
-		id := strings.TrimPrefix(r.URL.Path, "/api/forwards/")
-		cfg, _ := LoadConfig()
-
-		if r.Method == "DELETE" {
+	mux.HandleFunc("DELETE /api/forwards/{id}", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		err := store.Update(func(cfg *Config) error {
 			if !cfg.RemoveForward(id) {
-				http.Error(w, "not found", http.StatusNotFound)
-				return
+				return fmt.Errorf("not found")
 			}
-			if err := SaveConfig(cfg); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
+			return nil
+		})
+		if err != nil {
+			status := http.StatusInternalServerError
+			if err.Error() == "not found" {
+				status = http.StatusNotFound
 			}
-			DaemonReload()
-			w.WriteHeader(http.StatusOK)
+			http.Error(w, err.Error(), status)
 			return
 		}
+		DaemonReload()
+		w.WriteHeader(http.StatusOK)
+	})))
 
-		if r.Method == "PUT" {
-			var rule ForwardRule
-			if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
+	mux.HandleFunc("PUT /api/forwards/{id}", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		var rule ForwardRule
+		if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		err := store.Update(func(cfg *Config) error {
+			// Preserve server-assigned public addr and existing expose mode when not provided.
 			for _, f := range cfg.Forwards {
 				if f.ID == id {
 					rule.PublicAddr = f.PublicAddr
@@ -259,57 +319,21 @@ func StartWebInterface(addr string, openBrowser bool) error {
 					break
 				}
 			}
-			if err := cfg.UpdateForward(id, rule); err != nil {
-				http.Error(w, err.Error(), http.StatusNotFound)
-				return
+			return cfg.UpdateForward(id, rule)
+		})
+		if err != nil {
+			status := http.StatusInternalServerError
+			if err.Error() == "forward not found" {
+				status = http.StatusNotFound
 			}
-			if err := SaveConfig(cfg); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			DaemonReload()
-			w.WriteHeader(http.StatusOK)
+			http.Error(w, err.Error(), status)
 			return
 		}
-
-		if r.Method == "PATCH" {
-			var patch map[string]interface{}
-			if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			found := false
-			for i := range cfg.Forwards {
-				if cfg.Forwards[i].ID == id {
-					if v, ok := patch["expose"].(string); ok {
-						cfg.Forwards[i].Expose = v
-					}
-					if v, ok := patch["disabled"].(bool); ok {
-						cfg.Forwards[i].Disabled = v
-					}
-					found = true
-					break
-				}
-			}
-			if !found {
-				http.Error(w, "not found", http.StatusNotFound)
-				return
-			}
-			if err := SaveConfig(cfg); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			DaemonReload()
-			w.WriteHeader(http.StatusOK)
-			return
-		}
+		DaemonReload()
+		w.WriteHeader(http.StatusOK)
 	})))
 
-	mux.HandleFunc("/api/restart", auth(noCache(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
+	mux.HandleFunc("/api/restart", auth(noCache(allowMethod(http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
 		_ = DaemonStop()
 		time.Sleep(500 * time.Millisecond)
 		if err := DaemonStart(); err != nil {
@@ -317,7 +341,7 @@ func StartWebInterface(addr string, openBrowser bool) error {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-	})))
+	}))))
 
 	fmt.Printf("Web interface running on http://%s\n", addr)
 	if openBrowser {

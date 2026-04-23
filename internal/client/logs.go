@@ -177,73 +177,70 @@ func FetchRecentLogs(filter string, limit int) ([]proto.TrafficLogEntry, error) 
 	if err != nil {
 		return nil, err
 	}
+
+	entries := readDaemonLogTail(filepath.Join(logDir, "daemon.log"), 50)
+
 	latest := latestNDJSON(logDir)
-	var entries []proto.TrafficLogEntry
-
-	// Read daemon.log (tail last 50 lines)
-	daemonLog := filepath.Join(logDir, "daemon.log")
-	if f, err := os.Open(daemonLog); err == nil {
-		defer f.Close()
-
-		// Simple tail: skip to near end
-		info, _ := f.Stat()
-		if info.Size() > 10000 {
-			f.Seek(-10000, io.SeekEnd)
-		}
-
-		scanner := bufio.NewScanner(f)
-		var daemonEntries []proto.TrafficLogEntry
-		for scanner.Scan() {
-			line := scanner.Text()
-			if line != "" {
-				// Try to extract timestamp if present (daemon log uses standard log package)
-				// Format: 2026/04/22 04:03:23 msg
-				timestamp := time.Now().Format(time.RFC3339)
-				msg := line
-				if len(line) > 19 && line[4] == '/' && line[7] == '/' {
-					if t, err := time.Parse("2006/01/02 15:04:05", line[:19]); err == nil {
-						timestamp = t.Format(time.RFC3339)
-						msg = line[20:]
-					}
-				}
-
-				daemonEntries = append(daemonEntries, proto.TrafficLogEntry{
-					Time:      timestamp,
-					Protocol:  "DAEMON",
-					ForwardID: "system",
-					Action:    msg,
-				})
-			}
-		}
-		if len(daemonEntries) > 50 {
-			daemonEntries = daemonEntries[len(daemonEntries)-50:]
-		}
-		entries = append(entries, daemonEntries...)
-	}
-
 	if latest != "" {
-		f, err := os.Open(latest)
-		if err == nil {
-			scanner := bufio.NewScanner(f)
-			for scanner.Scan() {
-				line := scanner.Text()
-				if line == "" {
-					continue
-				}
-				var e proto.TrafficLogEntry
-				if err := json.Unmarshal([]byte(line), &e); err == nil {
-					if filter == "" || e.ForwardID == filter {
-						entries = append(entries, e)
-					}
-				}
-			}
-			f.Close()
+		var keep func(*proto.TrafficLogEntry) bool
+		if filter != "" {
+			keep = func(e *proto.TrafficLogEntry) bool { return e.ForwardID == filter }
 		}
+		more, err := tailNDJSON[proto.TrafficLogEntry]([]string{latest}, keep, 0)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, more...)
 	}
+
 	if limit > 0 && len(entries) > limit {
 		entries = entries[len(entries)-limit:]
 	}
 	return entries, nil
+}
+
+// readDaemonLogTail reads the tail of a plain daemon.log (not ndjson) and
+// returns the last `limit` lines wrapped as TrafficLogEntry records so they
+// surface in the dashboard alongside traffic events.
+func readDaemonLogTail(path string, limit int) []proto.TrafficLogEntry {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	// Simple tail: read near the end so we don't scan multi-MB logs.
+	if info, err := f.Stat(); err == nil && info.Size() > 10000 {
+		f.Seek(-10000, io.SeekEnd)
+	}
+
+	var entries []proto.TrafficLogEntry
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		// Daemon log uses standard `log` package format: "2026/04/22 04:03:23 msg"
+		timestamp := time.Now().Format(time.RFC3339)
+		msg := line
+		if len(line) > 19 && line[4] == '/' && line[7] == '/' {
+			if t, err := time.Parse("2006/01/02 15:04:05", line[:19]); err == nil {
+				timestamp = t.Format(time.RFC3339)
+				msg = line[20:]
+			}
+		}
+		entries = append(entries, proto.TrafficLogEntry{
+			Time:      timestamp,
+			Protocol:  "DAEMON",
+			ForwardID: "system",
+			Action:    msg,
+		})
+	}
+	if limit > 0 && len(entries) > limit {
+		entries = entries[len(entries)-limit:]
+	}
+	return entries
 }
 
 type ForwardMetrics struct {

@@ -157,6 +157,30 @@ func (cfg *Config) RemoveForward(id string) bool {
 	return false
 }
 
+// ToPayload returns the wire payload for registering this rule with the
+// server. Centralising the mapping here keeps the config and wire structs
+// from drifting silently when fields are added.
+func (r ForwardRule) ToPayload() proto.ForwardPayload {
+	domain := r.Domain
+	// For HTTP tunnels with no explicit domain, reuse the previously-assigned
+	// subdomain (saved in PublicAddr) so the URL stays stable across restarts.
+	if domain == "" && r.PublicAddr != "" &&
+		(r.Protocol == proto.ProtoHTTP || r.Protocol == proto.ProtoHTTPS) {
+		domain = r.PublicAddr
+	}
+	return proto.ForwardPayload{
+		ID:              r.ID,
+		Protocol:        r.Protocol,
+		LocalAddr:       r.LocalAddr,
+		Domain:          domain,
+		RemotePort:      r.RemotePort,
+		Expose:          r.Expose,
+		HTTPPassword:    r.HTTPPassword,
+		MaxConnections:  r.MaxConnections,
+		UnavailablePage: r.UnavailablePage,
+	}
+}
+
 func (cfg *Config) UpdateForward(id string, rule ForwardRule) error {
 	cfg.normalizeForward(&rule)
 	for i, f := range cfg.Forwards {

@@ -25,3 +25,6 @@ coverage.out
 # Test artifacts
 testHome/
 *.log
+
+# Scratch / local experiments (may contain secrets)
+/scratch/

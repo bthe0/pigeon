@@ -293,37 +293,6 @@ func TestWebAPI_DeleteForward_NotFound_Returns404(t *testing.T) {
 	}
 }
 
-// ── /api/forwards/{id} PATCH ──────────────────────────────────────────────────
-
-func TestWebAPI_PatchForward_Disable(t *testing.T) {
-	cfg := &client.Config{
-		Server: "s:2222",
-		Token:  "tok",
-		Forwards: []client.ForwardRule{
-			{ID: "p1", Protocol: proto.ProtoHTTP, LocalAddr: "localhost:3000"},
-		},
-	}
-	addr := startWeb(t, cfg)
-	patch := map[string]interface{}{"disabled": true}
-	body, _ := json.Marshal(patch)
-	resp := doRequest(t, "PATCH", "http://"+addr+"/api/forwards/p1", body, authHeader("tok"))
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("status = %d, want 200", resp.StatusCode)
-	}
-}
-
-func TestWebAPI_PatchForward_NotFound_Returns404(t *testing.T) {
-	addr := startWeb(t, &client.Config{Server: "s:2222", Token: "tok"})
-	patch := map[string]interface{}{"disabled": true}
-	body, _ := json.Marshal(patch)
-	resp := doRequest(t, "PATCH", "http://"+addr+"/api/forwards/ghost", body, authHeader("tok"))
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", resp.StatusCode)
-	}
-}
-
 // ── /api/logs ─────────────────────────────────────────────────────────────────
 
 func TestWebAPI_Logs_Returns200(t *testing.T) {
