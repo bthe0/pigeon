@@ -391,6 +391,26 @@ func (w *captureWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
+// Hijack forwards to the underlying ResponseWriter when it supports it. We
+// embed http.ResponseWriter (interface), which doesn't include Hijacker, so
+// without this method httputil.ReverseProxy's `rw.(http.Hijacker)` assertion
+// fails on WebSocket 101 responses and the upgrade silently never completes.
+func (w *captureWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("underlying ResponseWriter does not support hijacking")
+	}
+	return hj.Hijack()
+}
+
+// Flush mirrors Hijack — proxies need it when streaming responses (chunked
+// transfer, SSE, the brief window before a 101 upgrade is hijacked, etc.).
+func (w *captureWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func headerToMap(header http.Header) map[string]string {
 	if len(header) == 0 {
 		return nil
