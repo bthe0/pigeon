@@ -343,3 +343,39 @@
   min-width: 0;
   display: flex;
 }
+
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: var(--panel2);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  padding: 10px 14px;
+  font-size: 12px;
+  font-family: var(--sans);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  max-width: 360px;
+  animation: toastIn 160ms ease-out;
+}
+
+.toast_success {
+  border-color: rgba(0, 232, 122, 0.5);
+  color: #00e87a;
+}
+
+.toast_error {
+  border-color: rgba(255, 92, 92, 0.5);
+  color: #ff7a7a;
+}
+
+.toast_info {
+  border-color: var(--border2);
+  color: var(--text);
+}
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}

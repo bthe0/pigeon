@@ -7,6 +7,20 @@ export function SettingsView({ config, loading, dashFetch }) {
   const [showToken, setShowToken] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [confirmRestart, setConfirmRestart] = useState(false);
+  const [toast, setToast] = useState(null);
+  const toastTimer = useRef(null);
+
+  function showToast(message, kind = 'info', ttlMs = 3000) {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ message, kind });
+    if (ttlMs > 0) {
+      toastTimer.current = setTimeout(() => setToast(null), ttlMs);
+    }
+  }
+
+  useEffect(() => () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+  }, []);
 
   const [validating, setValidating] = useState(false);
   const [validateResult, setValidateResult] = useState(null);
@@ -40,8 +54,25 @@ export function SettingsView({ config, loading, dashFetch }) {
     try {
       const res = await dashFetch('/api/restart', { method: 'POST' });
       if (!res.ok) throw new Error(await res.text());
+      showToast('Restarting daemon…', 'info', 0);
+      // Poll /api/config until the new daemon answers — gives a real
+      // "back online" signal rather than a hopeful timeout.
+      const deadline = Date.now() + 15000;
+      let online = false;
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 500));
+        try {
+          const ping = await fetch('/api/config');
+          if (ping.ok) { online = true; break; }
+        } catch {}
+      }
+      if (online) {
+        showToast('Daemon restarted', 'success');
+      } else {
+        showToast('Daemon did not come back in time', 'error', 5000);
+      }
     } catch (err) {
-      alert("Failed to restart daemon: " + err.message);
+      showToast('Failed to restart daemon: ' + err.message, 'error', 5000);
     }
     setRestarting(false);
   }
@@ -256,6 +287,12 @@ export function SettingsView({ config, loading, dashFetch }) {
           onCancel={() => setConfirmRestart(false)}
           onConfirm={applyRestart}
         />
+      )}
+
+      {toast && (
+        <div className={`${styles.toast} ${styles['toast_' + toast.kind]}`}>
+          {toast.message}
+        </div>
       )}
 
       {confirmImport && (

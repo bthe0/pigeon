@@ -55,21 +55,91 @@ func OpenBrowser(url string) {
 // requests. The session's lastSeen is refreshed on every authed hit.
 const sessionIdleTimeout = 30 * 24 * time.Hour
 
-// sessionStore holds dashboard session IDs in memory. Session IDs are random
-// 32-byte values (hex-encoded) issued on successful login; they do not derive
-// from the password, so rotating the password, logging out, or restarting the
-// daemon all invalidate outstanding cookies. The previous implementation used
-// sha256(password) — a cookie that never changed until the password did —
-// which meant a captured cookie was equivalent to permanent access.
+// sessionStore holds dashboard session IDs in memory and mirrors them to a
+// file on disk so they survive a daemon restart (e.g. the dashboard's
+// "Restart Now" button). Session IDs are random 32-byte values (hex-encoded)
+// issued on successful login; they do not derive from the password, so
+// rotating the password or logging out still invalidates outstanding cookies.
+// The previous implementation used sha256(password) — a cookie that never
+// changed until the password did — which meant a captured cookie was
+// equivalent to permanent access.
 type sessionStore struct {
 	mu       sync.Mutex
 	sessions map[string]time.Time // id → lastSeen
+	path     string               // on-disk mirror; empty disables persistence
 }
 
 func newSessionStore() *sessionStore {
 	s := &sessionStore{sessions: make(map[string]time.Time)}
+	if path, err := sessionsPath(); err == nil {
+		s.path = path
+		s.loadLocked()
+	}
 	go s.gcLoop()
 	return s
+}
+
+// sessionsPath mirrors the PIDFile naming so dev/prod daemons keep
+// distinct session files (e.g. ~/.pigeon/sessions.json,
+// ~/.pigeon/sessions-dev.json).
+func sessionsPath() (string, error) {
+	cfgPath, err := ConfigPath()
+	if err != nil {
+		return "", err
+	}
+	dir, err := configDir()
+	if err != nil {
+		return "", err
+	}
+	base := filepath.Base(cfgPath)
+	name := strings.TrimSuffix(base, filepath.Ext(base))
+	if name == "config" {
+		return filepath.Join(dir, "sessions.json"), nil
+	}
+	return filepath.Join(dir, "sessions-"+name+".json"), nil
+}
+
+// loadLocked populates s.sessions from disk. Caller may hold s.mu (used at
+// construction before any goroutines can race). Stale entries past the idle
+// timeout are dropped on load.
+func (s *sessionStore) loadLocked() {
+	data, err := os.ReadFile(s.path)
+	if err != nil {
+		return
+	}
+	var raw map[string]time.Time
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-sessionIdleTimeout)
+	for id, seen := range raw {
+		if seen.After(cutoff) {
+			s.sessions[id] = seen
+		}
+	}
+}
+
+// persistLocked writes the current session map to disk atomically. Caller
+// must hold s.mu. Errors are logged but not returned — losing persistence
+// must not break login flows.
+func (s *sessionStore) persistLocked() {
+	if s.path == "" {
+		return
+	}
+	data, err := json.Marshal(s.sessions)
+	if err != nil {
+		log.Printf("session persist marshal: %v", err)
+		return
+	}
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		log.Printf("session persist write: %v", err)
+		return
+	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		log.Printf("session persist rename: %v", err)
+		_ = os.Remove(tmp)
+	}
 }
 
 func (s *sessionStore) gcLoop() {
@@ -78,11 +148,18 @@ func (s *sessionStore) gcLoop() {
 	for range t.C {
 		cutoff := time.Now().Add(-sessionIdleTimeout)
 		s.mu.Lock()
+		changed := false
 		for id, seen := range s.sessions {
 			if seen.Before(cutoff) {
 				delete(s.sessions, id)
+				changed = true
 			}
 		}
+		// Always flush so the on-disk lastSeen timestamps stay roughly in
+		// sync with memory (validate bumps lastSeen but doesn't persist
+		// every hit). One write per hour is cheap.
+		s.persistLocked()
+		_ = changed
 		s.mu.Unlock()
 	}
 }
@@ -95,12 +172,16 @@ func (s *sessionStore) issue() (string, error) {
 	id := hex.EncodeToString(buf[:])
 	s.mu.Lock()
 	s.sessions[id] = time.Now()
+	s.persistLocked()
 	s.mu.Unlock()
 	return id, nil
 }
 
 // validate reports whether id names a live session and, as a side effect,
-// bumps its lastSeen timestamp so active use extends the idle window.
+// bumps its lastSeen timestamp so active use extends the idle window. The
+// in-memory bump is not flushed to disk on every hit (the hourly gcLoop
+// flushes lastSeen); a crash can lose up to an hour of activity tracking,
+// which is well within the 30-day idle timeout.
 // Constant-time lookup is not required here because the sync-map key is
 // the caller-supplied cookie and `map` lookup already runs in constant
 // time over key length; the secret isn't the id itself but the presence of
@@ -117,6 +198,7 @@ func (s *sessionStore) validate(id string) bool {
 	}
 	if time.Since(seen) > sessionIdleTimeout {
 		delete(s.sessions, id)
+		s.persistLocked()
 		return false
 	}
 	s.sessions[id] = time.Now()
@@ -129,6 +211,7 @@ func (s *sessionStore) revoke(id string) {
 	}
 	s.mu.Lock()
 	delete(s.sessions, id)
+	s.persistLocked()
 	s.mu.Unlock()
 }
 
