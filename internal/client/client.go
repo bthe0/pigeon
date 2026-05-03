@@ -299,8 +299,11 @@ func (c *Client) handleTCPStream(stream net.Conn, rule *ForwardRule, hdr proto.S
 	}
 	defer local.Close()
 
-	c.logTraffic(rule, hdr.RemoteAddr, string(hdr.Protocol), "CONNECT", 0)
-	netx.Proxy(stream, local)
+	bytes := netx.Proxy(stream, local)
+	// Log once at the end with the real byte total. We used to log "CONNECT"
+	// at start with bytes=0, which left the dashboard's per-tunnel bandwidth
+	// pinned at 0 because nothing ever fed it the actual transfer size.
+	c.logTraffic(rule, hdr.RemoteAddr, string(hdr.Protocol), "CLOSE", int(bytes))
 }
 
 // handleUDPStream tunnels UDP traffic using a NAT-table pattern.

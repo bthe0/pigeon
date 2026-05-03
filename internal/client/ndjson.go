@@ -3,6 +3,9 @@ package client
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
+	"io/fs"
+	"log"
 	"os"
 )
 
@@ -17,6 +20,13 @@ func tailNDJSON[T any](paths []string, keep func(*T) bool, limit int) ([]T, erro
 		f, err := os.Open(path)
 		if err != nil {
 			if os.IsNotExist(err) {
+				continue
+			}
+			// A single unreadable file (e.g. left behind owned by root from a
+			// previous sudo run) shouldn't break the whole endpoint. Log once
+			// and skip — the rest of the rotated files are still readable.
+			if errors.Is(err, fs.ErrPermission) {
+				log.Printf("tailNDJSON: skipping %s: %v", path, err)
 				continue
 			}
 			return nil, err

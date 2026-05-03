@@ -45,7 +45,38 @@ function parseHTTPAction(action) {
   return { method: m[1], path: m[2], status: parseInt(m[3], 10), ms: parseInt(m[4], 10) };
 }
 
-function classifyRow(r) {
+// describeEvent renders the cryptic action codes (CONNECT/CLOSE/IN/OUT) the
+// daemon writes into the traffic log as plain English. Falls back to the raw
+// action token when it's not one we recognise.
+function describeEvent(proto, action, remote, tunnel) {
+  const peer = remote || 'an unknown client';
+  const dest = tunnel ? ` on ${tunnel}` : '';
+  switch ((action || '').toUpperCase()) {
+    case 'CONNECT': return `${proto} connection opened from ${peer}${dest}`;
+    case 'CLOSE':   return `${proto} connection from ${peer}${dest} closed`;
+    case 'IN':      return `${proto} packet received from ${peer}${dest}`;
+    case 'OUT':     return `${proto} packet sent to ${peer}${dest}`;
+    default:        return action ? `${proto} ${action} — ${peer}${dest}` : `${proto} event from ${peer}${dest}`;
+  }
+}
+
+// If a stray JSON-encoded TrafficLogEntry slips into a DAEMON line (the daemon
+// used to tee c.logger to stdout, which ended up in daemon.log), unwrap it so
+// the user doesn't see raw braces.
+function tryUnwrapJSON(r) {
+  const a = r.action;
+  if (typeof a !== 'string' || a.length === 0 || a[0] !== '{') return r;
+  try {
+    const inner = JSON.parse(a);
+    if (inner && typeof inner === 'object' && (inner.protocol || inner.action)) {
+      return { ...r, ...inner };
+    }
+  } catch {}
+  return r;
+}
+
+function classifyRow(raw) {
+  const r = tryUnwrapJSON(raw);
   const d = new Date(r.time);
   const t = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
 
@@ -66,16 +97,16 @@ function classifyRow(r) {
       const kind = parsed.status >= 500 ? 'ERROR' : parsed.status >= 400 ? 'WARN' : 'HTTP';
       return { t, kind, type: 'http', parsed, tunnel, remote, bytes };
     }
-    return { t, kind: 'HTTP', type: 'event', action, tunnel, remote, bytes, proto };
+    return { t, kind: 'HTTP', type: 'event', summary: describeEvent('HTTP', action, remote, tunnel), tunnel, remote, bytes, proto };
   }
   if (proto === 'TCP') {
-    return { t, kind: 'TCP', type: 'event', action, tunnel, remote, bytes, proto };
+    return { t, kind: 'TCP', type: 'event', summary: describeEvent('TCP', action, remote, tunnel), tunnel, remote, bytes, proto };
   }
   if (proto === 'UDP') {
-    return { t, kind: 'UDP', type: 'event', action, tunnel, remote, bytes, proto };
+    return { t, kind: 'UDP', type: 'event', summary: describeEvent('UDP', action, remote, tunnel), tunnel, remote, bytes, proto };
   }
   if (tunnel || remote || bytes) {
-    return { t, kind: 'INFO', type: 'event', action: action || 'request', tunnel, remote, bytes, proto: proto || '' };
+    return { t, kind: 'INFO', type: 'event', summary: describeEvent(proto || 'Connection', action, remote, tunnel), tunnel, remote, bytes, proto: proto || '' };
   }
   return { t, kind: 'INFO', type: 'sys', msg: `${r.protocol || '?'} ${action}`.trim() };
 }
@@ -239,10 +270,8 @@ function LogBody({ l }) {
   if (l.type === 'event') {
     return (
       <span className={styles.bodyEvent}>
-        <span className={styles.bodyAction}>{l.action || '—'}</span>
-        {l.tunnel ? <span className={styles.bodyDim}>· {l.tunnel}</span> : null}
-        {l.remote ? <span className={styles.bodyDim}>← {l.remote}</span> : null}
-        {l.bytes  ? <span className={styles.bodyDim}>· {formatBytes(l.bytes)}</span> : null}
+        <span className={styles.bodyAction}>{l.summary || '—'}</span>
+        {l.bytes ? <span className={styles.bodyDim}>· {formatBytes(l.bytes)}</span> : null}
       </span>
     );
   }

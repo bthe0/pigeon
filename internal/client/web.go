@@ -20,6 +20,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"embed"
@@ -527,13 +528,25 @@ func StartWebInterface(addr string, openBrowser bool) error {
 	})))
 
 	mux.HandleFunc("/api/restart", auth(noCache(allowMethod(http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
-		_ = DaemonStop()
-		time.Sleep(500 * time.Millisecond)
-		if err := DaemonStart(); err != nil {
+		exe, err := os.Executable()
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.WriteHeader(http.StatusOK)
+		// The web server runs inside this daemon, so a synchronous stop+start
+		// kills our own response mid-flight — the dashboard sees "Failed to
+		// fetch". Spawn a detached helper that waits long enough for the 200
+		// to flush, then bounces us and starts a fresh daemon. Setsid keeps
+		// the helper alive after we exit.
+		script := fmt.Sprintf("sleep 1; %q daemon stop; sleep 1; %q daemon start", exe, exe)
+		cmd := exec.Command("/bin/sh", "-c", script)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if err := cmd.Start(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("daemon restart scheduled via dashboard")
+		w.WriteHeader(http.StatusAccepted)
 	}))))
 
 	// Daemon tunneling state: pause keeps the dashboard alive but stops the

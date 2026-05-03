@@ -189,12 +189,15 @@ func DaemonRun(cfg *Config) {
 	writePID(pidFile, os.Getpid())
 	defer os.Remove(pidFile)
 
-	// Tee the default logger to daemon.log so the System Logs view in the
-	// dashboard has content even when the daemon is started inline (pigeon dev)
-	// where stdout/stderr are bound to the terminal rather than the log file.
-	if logDir, err := LogDir(); err == nil {
-		if f, err := os.OpenFile(filepath.Join(logDir, "daemon.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600); err == nil {
-			log.SetOutput(io.MultiWriter(os.Stderr, f))
+	// In daemon-fork mode the parent already redirected stderr to daemon.log,
+	// so teeing again via MultiWriter would write every line twice. Only tee
+	// when running inline (pigeon dev), where stderr points at the terminal
+	// and the dashboard would otherwise see an empty daemon.log.
+	if !IsDaemon() {
+		if logDir, err := LogDir(); err == nil {
+			if f, err := os.OpenFile(filepath.Join(logDir, "daemon.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600); err == nil {
+				log.SetOutput(io.MultiWriter(os.Stderr, f))
+			}
 		}
 	}
 

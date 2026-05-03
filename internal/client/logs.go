@@ -258,9 +258,18 @@ func readDaemonLogTail(path string, limit int) []proto.TrafficLogEntry {
 
 	var entries []proto.TrafficLogEntry
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
+			continue
+		}
+		// daemon.log captures both stderr (human log.Printf messages) and
+		// stdout (where c.logger writes ndjson TrafficLogEntries). Skip the
+		// JSON lines — they're already surfaced via the date-stamped ndjson
+		// path, and rendering them as opaque "DAEMON" actions in System Logs
+		// just shows the user raw JSON.
+		if len(line) > 0 && line[0] == '{' {
 			continue
 		}
 		// Daemon log uses standard `log` package format: "2026/04/22 04:03:23 msg"
