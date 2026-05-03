@@ -67,6 +67,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	isTLS := s.requestIsSecure(r)
+	isUpgrade := isWebSocketUpgrade(r)
 
 	// Default to HTTPS if expose is empty or explicitly set to both
 	expose := fwd.expose
@@ -76,7 +77,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch expose {
 	case "https":
-		if !isTLS {
+		// WebSocket clients don't follow HTTP redirects, so a 301 to https://
+		// here would silently fail the handshake. Let the upgrade through and
+		// rely on the client having connected to wss:// in the first place if
+		// they wanted TLS.
+		if !isTLS && !isUpgrade {
 			http.Redirect(w, r, "https://"+host+r.RequestURI, http.StatusMovedPermanently)
 			return
 		}
@@ -286,8 +291,13 @@ type connTransport struct {
 
 func (t *connTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	clone := req.Clone(req.Context())
-	clone.Close = true
 	clone.RequestURI = ""
+	// Don't force "Connection: close" on WebSocket upgrades — the connection
+	// must persist after the 101 so we can splice raw frames in both directions.
+	upgrade := isWebSocketUpgrade(req)
+	if !upgrade {
+		clone.Close = true
+	}
 	done := make(chan struct{})
 	var once sync.Once
 	stop := func() { once.Do(func() { close(done) }) }
@@ -302,13 +312,53 @@ func (t *connTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		stop()
 		return nil, err
 	}
-	resp, err := http.ReadResponse(bufio.NewReader(t.conn), clone)
+	br := bufio.NewReader(t.conn)
+	resp, err := http.ReadResponse(br, clone)
 	if err != nil {
 		stop()
 		return nil, err
 	}
+	if resp.StatusCode == http.StatusSwitchingProtocols {
+		// httputil.ReverseProxy detects the upgrade and, if resp.Body is an
+		// io.ReadWriteCloser, splices it bidirectionally with the hijacked
+		// client connection. Wrap the bufio'd reader + raw conn so any bytes
+		// the upstream already pushed past the response head aren't lost.
+		resp.Body = &upgradeBody{r: br, w: t.conn, c: t.conn, stop: stop}
+		return resp, nil
+	}
 	resp.Body = &cancelAwareReadCloser{ReadCloser: resp.Body, stop: stop}
 	return resp, nil
+}
+
+// isWebSocketUpgrade reports whether r is a WebSocket upgrade handshake.
+func isWebSocketUpgrade(r *http.Request) bool {
+	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		return false
+	}
+	for _, v := range r.Header.Values("Connection") {
+		for _, tok := range strings.Split(v, ",") {
+			if strings.EqualFold(strings.TrimSpace(tok), "upgrade") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// upgradeBody adapts the post-101 yamux stream to io.ReadWriteCloser so
+// httputil.ReverseProxy can hand bytes between client and upstream.
+type upgradeBody struct {
+	r    io.Reader
+	w    io.Writer
+	c    io.Closer
+	stop func()
+}
+
+func (u *upgradeBody) Read(p []byte) (int, error)  { return u.r.Read(p) }
+func (u *upgradeBody) Write(p []byte) (int, error) { return u.w.Write(p) }
+func (u *upgradeBody) Close() error {
+	u.stop()
+	return u.c.Close()
 }
 
 type cancelAwareReadCloser struct {
